@@ -399,6 +399,11 @@ Process_Command_Line (INT argc, char **argv)
 		if (!strcmp( cp, "xceptions" )) {
 		  CXX_Exceptions_On = TRUE;
 		}
+		if (!strcmp( cp, "nableacc" )) {
+		  Enable_UHACC = TRUE;
+		}
+                else if (strcmp (cp, "pilog") == 0)
+                    Epilog_Flag = TRUE;
 		else {
 		  ErrMsg ( EC_Unknown_Flag, *(cp-1), argv[i] );
 		}
@@ -413,6 +418,10 @@ Process_Command_Line (INT argc, char **argv)
 	    case 's':
 		if (strcmp (cp, "how") == 0) {
 		    Show_Progress = TRUE;
+		    break;
+		}
+	    else if (strcmp (cp, "2s") == 0) {
+		    run_ACCS2S= TRUE;
 		    break;
 		}
 #if defined(TARG_SL)

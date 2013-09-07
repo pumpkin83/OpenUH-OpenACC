@@ -927,7 +927,10 @@ Post_LNO_Processing (PU_Info *current_pu, WN *pu)
     
     /* Only run w2c and w2f on top-level PUs, unless otherwise requested.
      */
-    if (Run_w2c && !Run_w2fc_early) {
+     //Added by daniel tian, for OpenACC
+     char* funname = ST_name(WN_st(pu));
+	 BOOL isUselessInW2C = !strncmp("gnu_dev_", funname, 8);
+    if (Run_w2c && !Run_w2fc_early && !isUselessInW2C) {
       // Liao, add -CLIST:before_cg to control whirl2c before CG after wopt
       if (!W2C_Should_Before_CG()) { // the order of two IF matters here!
         if (W2C_Should_Emit_Nested_PUs() || is_user_visible_pu) {
@@ -1525,6 +1528,14 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
 #endif
         WB_LWR_Terminate();
     }
+	
+    BOOL has_acc = PU_has_acc (Get_Current_PU ());
+    if (has_acc) {
+		Set_Error_Phase ( "ACC Lowering" );
+        WB_LWR_Initialize(pu, NULL);
+		pu = WN_Lower (pu, LOWER_ACC, NULL, "Before ACC Lowering");
+        WB_LWR_Terminate();
+    }
 
 #ifdef KEY
     if (PU_cxx_lang (Get_Current_PU()))
@@ -1685,6 +1696,7 @@ Preprocess_PU (PU_Info *current_pu)
     Current_pu = &PU_Info_pu(current_pu);
     CURRENT_SYMTAB = PU_lexical_level(*Current_pu);
     if ((PU_is_nested_func(*Current_pu) && PU_mp(*Current_pu)) ||
+        (PU_is_nested_func(*Current_pu) && PU_acc(*Current_pu)) || 
         Is_Set_PU_Info_flags(current_pu, PU_IS_DRA_CLONE)) {
       is_mp_nested_pu = TRUE;
       // hack to restore nested PU's symtab
@@ -1935,7 +1947,8 @@ Preorder_Process_PUs (PU_Info *current_pu)
   BOOL orig_run_preopt = Run_preopt;
   BOOL orig_run_wopt = Run_wopt;
   BOOL orig_olimit_opt = Olimit_opt;
-
+  BOOL isOpenACCRegion;
+  BOOL backup_run_cg;
   WN *pu;
 #ifdef TARG_X8664
   if (!Force_Frame_Pointer_Set)
@@ -1958,6 +1971,12 @@ Preorder_Process_PUs (PU_Info *current_pu)
   Start_Timer(T_BE_PU_CU);
 
   pu = Preprocess_PU(current_pu);
+  isOpenACCRegion = PU_acc(Get_Current_PU());
+  backup_run_cg = Run_cg;
+  if(isOpenACCRegion == TRUE)
+  {
+  	Run_cg = FALSE;
+  }
 
   // Quick! Before anyone risks creating any PREGs in the back end,
   // register the back end's PREG table with the main PREG table so
@@ -2033,6 +2052,11 @@ Preorder_Process_PUs (PU_Info *current_pu)
   }
 
   Postprocess_PU (current_pu);
+  
+  if(isOpenACCRegion == TRUE)
+  {
+  	Run_cg = backup_run_cg;
+  }
 } /* Preorder_Process_PUs */
 
 static void Print_Tlog_Header(INT argc, char **argv)
@@ -2153,7 +2177,10 @@ main (INT argc, char **argv)
 
   Preconfigure ();
   Process_Command_Line (argc, argv);
-
+  //added by daniel, if OpenACC source2source is adopted, disable CG.
+  if(run_ACCS2S&&Enable_UHACC)
+  	Run_cg = FALSE;
+  
   if (Inhibit_EH_opt && Opt_Level > 1) Opt_Level = 1;
   Reset_Timers ();
   Start_Timer(T_BE_Comp);
