@@ -1623,6 +1623,9 @@ Create_ST_For_Tree (gs_t decl_node)
 
     case GS_FUNCTION_DECL:
       {
+		//For OpenACC offload function, by daniel tian
+	  	bool flags1 = gs_decl_lang_flag_6(decl_node);		
+	  	bool flags2 = gs_tree_lang_flag_6(decl_node);
         if (Enable_WFE_DFE) {
           gs_t body = gs_decl_saved_tree(decl_node);
           if (gs_decl_thunk_p(decl_node) &&
@@ -1680,6 +1683,13 @@ Create_ST_For_Tree (gs_t decl_node)
 	  p++;
         ST_Init (st, Save_Str(p),
                  CLASS_FUNC, sclass, eclass, TY_IDX (pu_idx));
+		//For OpenACC offload function, by daniel tian
+		if(flags1 && flags2) //Used by openACC. It means this function is a device function.
+		{
+			Set_ST_ACC_device_func(st);			
+			Set_PU_acc(pu);
+			Set_PU_has_acc(pu);
+		}
 
         // St is a constructor
         if (gs_decl_complete_constructor_p(decl_node) && !gs_decl_copy_constructor_p(decl_node))

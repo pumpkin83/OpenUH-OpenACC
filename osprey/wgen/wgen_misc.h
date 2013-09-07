@@ -174,4 +174,5 @@ Get_Srcpos (void)
 
 #endif
 
+extern BOOL g_bOffloadRegion;
 #endif

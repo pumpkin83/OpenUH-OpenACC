@@ -359,7 +359,19 @@ struct operator_from_tree_t {
  GS_UNBOUND_CLASS_TEMPLATE,	OPERATOR_UNKNOWN,
  GS_VEC_DELETE_EXPR,		OPERATOR_UNKNOWN,
  GS_VEC_NEW_EXPR,		OPERATOR_UNKNOWN,
- GS_TEMPLATE_TEMPLATE_PARM,	OPERATOR_UNKNOWN,
+ GS_TEMPLATE_TEMPLATE_PARM,	OPERATOR_UNKNOWN, 
+ #ifdef FE_GNU_4_2_0
+ GS_ACC_PARALLEL,		OPERATOR_UNKNOWN,
+ GS_ACC_KERNEL,			OPERATOR_UNKNOWN,
+ GS_ACC_LOOP,			OPERATOR_UNKNOWN,
+ GS_ACC_HOST_DATA,		OPERATOR_UNKNOWN,
+ GS_ACC_DATA,			OPERATOR_UNKNOWN,
+ GS_ACC_UPDATE,			OPERATOR_UNKNOWN,
+ GS_ACC_CACHE,			OPERATOR_UNKNOWN,
+ GS_ACC_DECLARE,		OPERATOR_UNKNOWN,
+ GS_ACC_WAIT,			OPERATOR_UNKNOWN,
+ GS_ACC_CLAUSE,			OPERATOR_UNKNOWN,
+#endif
  GS_FREQ_HINT_STMT,		OPERATOR_UNKNOWN,
  GS_ZDL_STMT,                   OPERATOR_UNKNOWN,
 };
@@ -1186,6 +1198,65 @@ WGEN_Expand_Math_Errno_Sqrt(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
   WGEN_Stmt_Append(stmt, Get_Srcpos());
 
   WGEN_Stmt_Pop(wgen_stmk_if_then);
+
+  return WN_Ldid(ret_mtype, 0, res_st, ty_idx);
+}
+
+
+static WN * 
+WGEN_Expand_ACC_Sqrt(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
+{
+  WN *arg_wn = WGEN_Expand_Expr (gs_tree_value (gs_tree_operand (exp, 1)));
+  ST *arg_st = Gen_Temp_Symbol(ty_idx, "__sqrt_arg");
+  //////////////////////////////////////////////////////////////
+#ifdef FE_GNU_4_2_0
+  WGEN_add_pragma_to_enclosing_regions (WN_PRAGMA_LOCAL, arg_st);
+#endif
+  WN *stmt = WN_Stid(ret_mtype, 0, arg_st, ty_idx, arg_wn);
+  WGEN_Stmt_Append(stmt, Get_Srcpos());
+
+  //arg_wn = WN_Ldid(ret_mtype, 0, arg_st, ty_idx);
+  //WN *wn = WN_CreateExp1 (OPR_SQRT, ret_mtype, MTYPE_V, arg_wn);
+
+  ST *res_st = Gen_Temp_Symbol(ty_idx, "__save_sqrt");
+#ifdef FE_GNU_4_2_0
+  WGEN_add_pragma_to_enclosing_regions (WN_PRAGMA_LOCAL, res_st);
+#endif
+  //stmt = WN_Stid(ret_mtype, 0, res_st, ty_idx, wn);
+  //WGEN_Stmt_Append(stmt, Get_Srcpos());
+
+  //wn = WN_Ldid(ret_mtype, 0, res_st, ty_idx);
+  //WN *wn0 = WN_Ldid(ret_mtype, 0, res_st, ty_idx);
+  //WN *then_block = WN_CreateBlock();
+  //WN *else_block = WN_CreateBlock();
+  //WN *if_stmt = WN_CreateIf( WN_Relational(OPR_NE, ret_mtype, wn, wn0),
+  //			     then_block, else_block);
+ // WGEN_Stmt_Append(if_stmt, Get_Srcpos());
+
+  //WGEN_Stmt_Push (then_block, wgen_stmk_if_then, Get_Srcpos());
+  //////////////////////////////////////////////////////////////
+
+  // generate the call to sqrt()
+  gs_t arg0 = gs_tree_operand(exp, 0);
+  WN *call_wn = WN_Create(OPR_CALL, ret_mtype, MTYPE_V, 1);
+  ST *st2 = DECL_ST2(gs_tree_operand(arg0, 0));
+  if (Opt_Level > 0 && st2) {
+    WN_st_idx (call_wn) = ST_st_idx (st2);
+  }
+  else {
+    ST *st = Get_ST (gs_tree_operand (arg0, 0));
+    WN_st_idx (call_wn) = ST_st_idx (st);
+  }
+  arg_wn = WN_Ldid(ret_mtype, 0, arg_st, ty_idx);
+  arg_wn = WN_CreateParm(ret_mtype, arg_wn, ty_idx, WN_PARM_BY_VALUE);
+  WN_kid(call_wn, 0) = arg_wn;
+  WGEN_Stmt_Append(call_wn, Get_Srcpos());
+
+  WN* wn = WN_Ldid (ret_mtype, -1, Return_Val_Preg, ty_idx);
+  stmt = WN_Stid(ret_mtype, 0, res_st, ty_idx, wn);
+  WGEN_Stmt_Append(stmt, Get_Srcpos());
+
+  //WGEN_Stmt_Pop(wgen_stmk_if_then);
 
   return WN_Ldid(ret_mtype, 0, res_st, ty_idx);
 }
@@ -6998,6 +7069,38 @@ WGEN_Expand_Expr (gs_t exp,
 	if (!wn)
 	  break;
 #endif
+
+	//for OpenACC
+	
+    gs_t lt = gs_tree_type(exp);
+    gs_t rt = gs_tree_type(gs_tree_operand(exp,0));
+	
+	if(gs_tree_code(lt) == GS_POINTER_TYPE &&
+             gs_tree_code(rt) == GS_POINTER_TYPE )
+	{
+		
+        TY_IDX lti,rti;
+        lti = Get_TY(lt);
+        rti = Get_TY(rt);
+		
+		if(TY_mtype(TY_pointed(lti)) != TY_mtype(TY_pointed(rti)) &&
+                       TY_kind(TY_pointed(rti)) == KIND_VOID) 
+        {
+              //user level cast - need to spill the intermediate result since
+              // inserting a TAS will be lost in the back-end
+              TY_IDX ltit;
+              ltit = lti;
+              ST *temp = Gen_Temp_Symbol(ltit, "_casttmp");
+              WN *wn0 = WN_Create(OPR_TAS, Pointer_Mtype, MTYPE_V,1);
+              WN_kid0(wn0) = wn;
+              WN_set_ty(wn0, ltit);
+              wn0 = WN_Stid(Pointer_Mtype, 0, temp,  ltit, wn0);
+              WGEN_Stmt_Append (wn0, Get_Srcpos ());
+              wn = WN_Ldid(Pointer_Mtype, 0, temp, ltit);
+		}
+		break;
+	}
+
 	if (mtyp == MTYPE_V) 
 	  break;
 	if (mtyp == MTYPE_M) 
@@ -8789,7 +8892,13 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_SQRTL:
 #endif
 	       	if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-		if (! gs_flag_errno_math(program)) {
+			//This is for OpenACC, by daniel
+		if(g_bOffloadRegion)
+		{
+			wn = WGEN_Expand_ACC_Sqrt(exp, ty_idx, ret_mtype);
+		}
+			
+		else if (! gs_flag_errno_math(program)) {
 		  arg_wn = WGEN_Expand_Expr (gs_tree_value (gs_tree_operand (exp, 1)));
 		  wn = WN_CreateExp1 (OPR_SQRT, ret_mtype, MTYPE_V, arg_wn);
 		}
@@ -11010,6 +11119,17 @@ WGEN_Expand_Expr (gs_t exp,
     case GS_OMP_TASK:
     case GS_OMP_SECTIONS:
     case GS_OMP_SINGLE:
+	//OpenACC Tree Nodes
+	case GS_ACC_PARALLEL:
+ 	case GS_ACC_KERNEL:
+ 	case GS_ACC_LOOP:
+ 	case GS_ACC_HOST_DATA:
+ 	case GS_ACC_DATA:
+ 	case GS_ACC_UPDATE:
+ 	case GS_ACC_CACHE:
+	case GS_ACC_DECLARE:
+ 	case GS_ACC_WAIT:
+ 	case GS_ACC_CLAUSE:
       WGEN_Expand_Stmt(exp);
       break;
 #endif
