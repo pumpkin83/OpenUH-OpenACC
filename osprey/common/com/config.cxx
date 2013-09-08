@@ -294,6 +294,9 @@ BOOL LANG_IEEE_Minus_Zero_Set = FALSE;
 BOOL LANG_Enable_CXX_Openmp = FALSE;
 BOOL LANG_Enable_CXX_Openmp_Set = FALSE;
 
+BOOL LANG_Enable_CXX_Openacc = FALSE;
+BOOL LANG_Enable_CXX_Openacc_Set = FALSE;
+
 BOOL LANG_Enable_Global_Asm = FALSE;
 BOOL LANG_Enable_Global_Asm_Set = FALSE;
 # endif /* KEY Bug 3405 */
@@ -772,6 +775,9 @@ static OPTION_DESC Options_LANG[] = {
     { OVK_BOOL, OV_INTERNAL,    TRUE, "cxx_openmp",             "",
       0, 0, 0,  &LANG_Enable_CXX_Openmp,        &LANG_Enable_CXX_Openmp_Set,
       "C++: Enable OpenMP processing." },
+    { OVK_BOOL, OV_INTERNAL,    TRUE, "cxx_openacc",             "",
+      0, 0, 0,  &LANG_Enable_CXX_Openacc,        &LANG_Enable_CXX_Openacc_Set,
+      "C++: Enable OpenACC processing." },
     { OVK_BOOL, OV_INTERNAL,	TRUE, "global_asm",		"",
       0, 0, 0,	&LANG_Enable_Global_Asm,	&LANG_Enable_Global_Asm_Set,
       "Handle global scope ASMs fully." },
@@ -1007,6 +1013,8 @@ BOOL Enable_Coarray = FALSE; /* -deepak */
 
 #ifdef BACK_END
 /* back end phases options */
+BOOL run_ACCS2S = FALSE;		    /* run code generator */
+BOOL Enable_UHACC = FALSE;		    /* run OpenACC generator */
 BOOL Run_lno = FALSE;		    /* run loop-nest optimizer */
 BOOL Run_wopt = FALSE;		    /* run WHIRL global optimizer */
 BOOL Run_preopt = FALSE;	    /* run WHIRL preopt optimizer */

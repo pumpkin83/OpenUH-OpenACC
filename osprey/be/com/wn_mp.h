@@ -93,6 +93,8 @@ extern "C" {
 #endif
 
 extern WN * lower_mp (WN * block, WN * node, INT32 actions);
+extern WN * lower_acc (WN * block, WN * node, INT64 actions);
+
 extern void LowerMP_PU_Init (void);
 
 extern WN * Gen_MP_Getlock ( ST * lock );
@@ -106,6 +108,20 @@ extern void Verify_No_MP(WN *tree);
 typedef DYN_ARRAY<WN *> REDUCTION_LIST;
 extern INT
 MP_Reduction_Combine_Cycles(REDUCTION_LIST *rlist, BOOL *using_critical);
+
+typedef enum {
+  ACCP_UNKNOWN,
+  ACCP_PARALLEL_REGION,
+  ACCP_LOOP_REGION,
+  ACCP_HOST_DATA_REGION,
+  ACCP_DATA_REGION,
+  ACCP_KERNEL_REGION,
+  ACCP_UPDATE_REGION,
+  ACCP_CACHE_REGION,
+  ACCP_DECLARE_REGION,
+  ACCP_WAIT_REGION 
+} ACCP_process_type;
+
 
 typedef enum {
   MPP_UNKNOWN,

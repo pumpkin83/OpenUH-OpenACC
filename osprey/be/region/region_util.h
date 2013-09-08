@@ -148,6 +148,7 @@ typedef enum {
   RID_TYPE_major  = 0x100, /* region type for major region */
   RID_TYPE_minor = 0x200,  /* region type for minor region*/
 #endif 
+  RID_TYPE_acc	      	= 0x400,	/* it's a ACC region (transparent)	     */
   RID_TYPE_eh	        = 0x3f000, /* EH region mask (all EH are transparent)*/
   RID_TYPE_try	        = 0x01000, /* it's a try-block			     */
   RID_TYPE_cleanup      = 0x02000, /* it's a cleanup region		     */
@@ -341,6 +342,9 @@ typedef struct region_id {
 #define RID_TYPE_mp(r)               (RID_type(r) & RID_TYPE_mp)
 #define RID_TYPE_mp_Set(r)           (RID_type(r) = \
 				     (RID_TYPE)(RID_type(r) | RID_TYPE_mp))
+#define RID_TYPE_acc(r)           (RID_type(r) & RID_TYPE_acc)
+#define RID_TYPE_acc_Set(r)           (RID_type(r) = \
+				     (RID_TYPE)(RID_type(r) | RID_TYPE_acc))
 #define RID_TYPE_mp_Reset(r)         (RID_type(r) = \
 				     (RID_TYPE)(RID_type(r) & ~RID_TYPE_mp))
 
@@ -420,7 +424,8 @@ typedef struct region_id {
 				 || RID_TYPE_mp(r) \
 				 || RID_TYPE_eh(r) \
 				 || RID_TYPE_swp(r) \
-				 || RID_TYPE_cold(r))
+				 || RID_TYPE_cold(r)\
+				 || RID_TYPE_acc(r))
 
 #if defined(TARG_SL2)
 #define RID_TYPE_sl2_para(r)   ( RID_TYPE_major(r) \

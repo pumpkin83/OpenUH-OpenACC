@@ -240,6 +240,7 @@ extern const char * WHIRL2C_make_valid_c_name(const char *name);
 extern void WHIRL2C_parenthesize(TOKEN_BUFFER tokens);
 
 extern int compiling_upc_flag;
+extern BOOL isGPUKernelFunc;
 
 struct eqstr {
   bool operator()(const char* s1, const char* s2) const

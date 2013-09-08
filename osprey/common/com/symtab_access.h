@@ -155,6 +155,77 @@ ST_sym_class (const ST& s)		{ return s.sym_class; }
 inline void
 Set_ST_sym_class (ST& s, ST_CLASS c)	{ s.sym_class = c; }
 
+#ifdef __UH_OPENACC_1_0
+inline ST_ACC_TYPE
+ST_acc_type_class (ST& s)	{ return s.acc_type; }
+inline void
+Set_ST_acc_type_class (ST& s, ST_ACC_TYPE act)	{ s.acc_type= act; }
+inline ST_ACC_TYPE
+ST_acc_type_class (ST* s)	{ return s->acc_type; }
+inline void
+Set_ST_acc_type_class (ST* s, ST_ACC_TYPE act)	{ s->acc_type= act; }
+
+inline BOOL
+ST_is_ACC_shared_array (const ST& s)		{ return s.acc_flags & ST_IS_ACC_SHARED_ARRAY;}
+inline void
+Set_ST_ACC_shared_array (ST& s)		{ s.acc_flags |= ST_IS_ACC_SHARED_ARRAY; }
+inline BOOL
+ST_is_ACC_shared_array (const ST* s)		{ return s->acc_flags & ST_IS_ACC_SHARED_ARRAY;}
+inline void
+Set_ST_ACC_shared_array (ST* s)		{ s->acc_flags |= ST_IS_ACC_SHARED_ARRAY; }
+
+
+inline BOOL
+ST_is_ACC_shared_scalar (const ST& s)		{ return s.acc_flags & ST_IS_ACC_SHARED_SCALAR_VAR;}
+inline void
+Set_ST_ACC_shared_scalar (ST& s)		{ s.acc_flags |= ST_IS_ACC_SHARED_SCALAR_VAR; }
+inline BOOL
+ST_is_ACC_shared_scalar (const ST* s)		{ return s->acc_flags & ST_IS_ACC_SHARED_SCALAR_VAR;}
+inline void
+Set_ST_ACC_shared_scalar (ST* s)		{ s->acc_flags |= ST_IS_ACC_SHARED_SCALAR_VAR; }
+
+
+inline BOOL
+ST_is_ACC_const_array (const ST& s)		{ return s.acc_flags & ST_IS_ACC_CONST_ARRAY;}
+inline void
+Set_ST_ACC_const_array (ST& s)		{ s.acc_flags |= ST_IS_ACC_CONST_ARRAY; }
+inline BOOL
+ST_is_ACC_const_array (const ST* s)		{ return s->acc_flags & ST_IS_ACC_CONST_ARRAY;}
+inline void
+Set_ST_ACC_const_array (ST* s)		{ s->acc_flags |= ST_IS_ACC_CONST_ARRAY; }
+
+
+
+inline BOOL
+ST_is_ACC_const_var (const ST& s)		{ return s.acc_flags & ST_IS_ACC_CONST_VAR;}
+inline void
+Set_ST_ACC_const_var (ST& s)		{ s.acc_flags |= ST_IS_ACC_CONST_VAR; }
+inline BOOL
+ST_is_ACC_const_var (const ST* s)		{ return s->acc_flags & ST_IS_ACC_CONST_VAR;}
+inline void
+Set_ST_ACC_const_var (ST* s)		{ s->acc_flags |= ST_IS_ACC_CONST_VAR; }
+
+
+inline BOOL
+ST_is_ACC_kernels_func (const ST& s)		{ return s.acc_flags & ST_IS_ACC_KERNELS_FUNC;}
+inline void
+Set_ST_ACC_kernels_func (ST& s)		{ s.acc_flags |= ST_IS_ACC_KERNELS_FUNC; }
+inline BOOL
+ST_is_ACC_kernels_func (const ST* s)		{ return s->acc_flags & ST_IS_ACC_KERNELS_FUNC;}
+inline void
+Set_ST_ACC_kernels_func (ST* s)		{ s->acc_flags |= ST_IS_ACC_KERNELS_FUNC; }
+
+
+inline BOOL
+ST_is_ACC_device_func (const ST& s)		{ return s.acc_flags & ST_IS_ACC_DEVICE_FUNC;}
+inline void
+Set_ST_ACC_device_func (ST& s)		{ s.acc_flags |= ST_IS_ACC_DEVICE_FUNC; }
+inline BOOL
+ST_is_ACC_device_func (const ST* s)		{ return s->acc_flags & ST_IS_ACC_DEVICE_FUNC;}
+inline void
+Set_ST_ACC_device_func (ST* s)		{ s->acc_flags |= ST_IS_ACC_DEVICE_FUNC; }
+#endif
+
 inline ST_SCLASS
 ST_storage_class (const ST& s)		{ return s.storage_class; }
 inline void
@@ -954,6 +1025,20 @@ inline void
 Clear_PU_mp (PU& pu)			{ pu.flags &= ~PU_MP; }
 
 inline BOOL
+PU_has_acc (const PU& pu)		{ return (pu.flags & PU_HAS_ACC) ? true: false; }
+inline void
+Set_PU_has_acc (PU& pu)			{ pu.flags |= PU_HAS_ACC; }
+inline void
+Clear_PU_has_acc (PU& pu)		{ pu.flags &= ~PU_HAS_ACC; }
+
+inline BOOL
+PU_acc (const PU& pu)			{ return (pu.flags & PU_ACC) ? true: false; }
+inline void
+Set_PU_acc (PU& pu)			{ pu.flags |= PU_ACC; }
+inline void
+Clear_PU_acc (PU& pu)			{ pu.flags &= ~PU_ACC; }
+
+inline BOOL
 PU_is_task (const PU& pu)	{ return (pu.flags & PU_IS_TASK) != 0; }
 inline void
 Set_PU_is_task (PU& pu)		{ pu.flags |= PU_IS_TASK; }
@@ -1072,6 +1157,13 @@ inline void
 Set_PU_mp_lower_generated (PU& pu) 	{ pu.flags |= PU_MP_LOWER_GENERATED; }
 inline void
 Clear_PU_mp_lower_generated (PU& pu)	{ pu.flags &= ~PU_MP_LOWER_GENERATED; }
+
+inline BOOL
+PU_acc_lower_generated (const PU& pu)	{ return (pu.flags & PU_ACC_LOWER_GENERATED) != 0; }
+inline void
+Set_PU_acc_lower_generated (PU& pu) 	{ pu.flags |= PU_ACC_LOWER_GENERATED; }
+inline void
+Clear_PU_acc_lower_generated (PU& pu)	{ pu.flags &= ~PU_ACC_LOWER_GENERATED; }
 
 inline BOOL
 PU_is_operator (const PU& pu)    { return (pu.flags & PU_IS_OPERATOR) != 0; }
@@ -2103,6 +2195,13 @@ inline void
 Set_FILE_INFO_has_mp (FILE_INFO& f)	{ f.flags |= FI_HAS_MP; }
 inline void
 Clear_FILE_INFO_has_mp (FILE_INFO& f){ f.flags &= ~FI_HAS_MP; }
+
+inline BOOL
+FILE_INFO_has_acc (const FILE_INFO& f){ return f.flags & FI_HAS_ACC; }
+inline void
+Set_FILE_INFO_has_acc (FILE_INFO& f)	{ f.flags |= FI_HAS_ACC; }
+inline void
+Clear_FILE_INFO_has_acc (FILE_INFO& f){ f.flags &= ~FI_HAS_ACC; }
 
 inline BOOL
 FILE_INFO_has_global_asm (const FILE_INFO& f)  { return f.flags & FI_HAS_GLOBAL_ASM; }

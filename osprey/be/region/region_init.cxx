@@ -1161,7 +1161,7 @@ RINIT::Process_region(WN *wtmp, WN *block, INT32 level, RID *root,
 #ifdef TARG_SL //add_type_for_minor  //PARA_EXTENSION
   if (!RID_TYPE_eh(rid) && !RID_TYPE_mp(rid) && !RID_TYPE_sl2_para(rid)) 
 #else 
-  if (!RID_TYPE_eh(rid) && !RID_TYPE_mp(rid)) 
+  if (!RID_TYPE_eh(rid) && !RID_TYPE_mp(rid) && !RID_TYPE_acc(rid)) 
 #endif   	
     REGION_has_black_regions(rid); // set black bit to top region
 

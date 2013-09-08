@@ -193,6 +193,7 @@ static const CALLSITE   *WN2C_Prev_CallSite = NULL;
 
 static char last_ret_tmp[64]; //Liao
 
+BOOL isGPUKernelFunc = false;
 
 #ifdef COMPILE_UPC
 extern char upc_debug_line[1024];
@@ -3360,9 +3361,16 @@ WN2C_Append_Symtab_Vars(TOKEN_BUFFER tokens,
 	 if (tokens != NULL)
 	    Append_And_Reclaim_Token_List(tokens, &tmp_tokens);
 	 else
+	 {
+	 	//TOKEN_BUFFER tmp_tokens2 = New_Token_Buffer();
+		//Append_And_Copy_Token_List(tmp_tokens2, tmp_tokens);
 	    Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
 				     NULL, /* No srcpos map */
 				     &tmp_tokens);
+	    //Write_And_Reclaim_Tokens(W2C_File[W2C_GPUH_FILE], 
+		//		     NULL, /* No srcpos map */
+		//		     &tmp_tokens2);
+	 }
       }
    }
 } /* WN2C_Append_Symtab_Vars */
@@ -4200,7 +4208,7 @@ WN2C_func_entry(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
     */
    ST **param_st;
    INT  param;
-   
+   isGPUKernelFunc = PU_acc(Get_Current_PU());
    Is_True(WN_operator(wn) == OPR_FUNC_ENTRY, 
 	   ("Invalid opcode for WN2C_func_entry()"));
 
@@ -6172,7 +6180,9 @@ WN2C_array(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
       if (set_ptr_as_array)
 	 Clear_TY_ptr_as_array(Ty_Table[base_ty]);  /* Reset w2c side-effect! */
       ety = TY_pointed(base_ty);
-      WHIRL2C_parenthesize(tmp_tokens);
+	  //In the kernel function, we don't need the parenthesize symbol., by daniel tian
+	  if(!isGPUKernelFunc)
+      	WHIRL2C_parenthesize(tmp_tokens);
    }
    else if (!TY_Is_Pointer(base_ty))
    {

@@ -12848,7 +12848,19 @@ WN *lower_block(WN *tree, LOWER_ACTIONS actions)
 	 (WN_opcode(WN_first(WN_region_pragmas(node))) == OPC_XPRAGMA)) &&
         (WN_pragmas[WN_pragma(WN_first(WN_region_pragmas(node)))].users &
 	 PUSER_MP))))
-	node = lower_mp(out, node, actions);
+		node = lower_mp(out, node, actions);
+
+	
+    while (Action(LOWER_ACC) && node &&
+      ((((WN_opcode(node) == OPC_PRAGMA) || (WN_opcode(node) == OPC_XPRAGMA))
+	&& (WN_pragmas[WN_pragma(node)].users & PUSER_ACC)) ||
+       ((WN_opcode(node) == OPC_REGION) && WN_first(WN_region_pragmas(node)) &&
+        ((WN_opcode(WN_first(WN_region_pragmas(node))) == OPC_PRAGMA) ||
+	 (WN_opcode(WN_first(WN_region_pragmas(node))) == OPC_XPRAGMA)) &&
+        (WN_pragmas[WN_pragma(WN_first(WN_region_pragmas(node)))].users &
+	 PUSER_ACC))))
+		node = lower_acc(out, node, actions);
+	
     if (node == NULL) break;
 
     /*

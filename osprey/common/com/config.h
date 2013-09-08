@@ -426,6 +426,8 @@ extern BOOL LANG_Enable_CXX_Openmp;
 extern BOOL LANG_Enable_Global_Asm;
 #endif
 
+extern BOOL LANG_Enable_CXX_Openacc;
+
 extern BOOL WHIRL_Mtype_A_On;
 extern BOOL WHIRL_Mtype_B_On;
 extern BOOL WHIRL_Mtype_BS_On;
@@ -741,6 +743,8 @@ extern BOOL Enable_Coarray; /* -deepak */
 
 /* back end phases options */
 #ifdef BACK_END
+extern BOOL Enable_UHACC;
+extern BOOL run_ACCS2S;
 extern BOOL Run_lno;		    /* run loop-nest optimizer */
 extern BOOL Run_lego;               /* run lego-lowering */
 extern BOOL Run_lego_given;         /* was run lego-lowering given/not */

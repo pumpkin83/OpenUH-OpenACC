@@ -520,6 +520,8 @@ Stab_Compare_Types(TY_IDX t1,
      case KIND_ARRAY:
 	if (TY_Is_String(t2) && TY_Is_Array_Of_Chars(t1))
 	   return TRUE;
+	else if(TY_kind(t2) == KIND_POINTER && TY_pointed(t2) == TY_etype(t1) && isGPUKernelFunc)
+		return TRUE;
 #ifdef _UH_COARRAYS
     else if (TY_is_coarray(t1)) {
         ARB_HANDLE bounds(Ty_Table[t1].Arb());
