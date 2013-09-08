@@ -402,8 +402,6 @@ Process_Command_Line (INT argc, char **argv)
 		if (!strcmp( cp, "nableacc" )) {
 		  Enable_UHACC = TRUE;
 		}
-                else if (strcmp (cp, "pilog") == 0)
-                    Epilog_Flag = TRUE;
 		else {
 		  ErrMsg ( EC_Unknown_Flag, *(cp-1), argv[i] );
 		}
