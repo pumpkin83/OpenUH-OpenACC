@@ -128,6 +128,8 @@ boolean ldscript_file = FALSE;
 boolean Long_Long_Support = FALSE;
 boolean Float_Point_Support = FALSE;
 #endif
+boolean compiling_acc = FALSE;
+boolean compiling_acc_s2s = FALSE;
 
 extern void turn_down_opt_level (int new_olevel, char *msg);
 
@@ -263,6 +265,24 @@ add_implied_string (string_list_t *list, int iflag, int flag, phases_t phase)
 		else if (strcmp(iname, "-mp") == 0
 			 && (phase == P_spin_cc1 || phase == P_spin_cc1plus)) {
 			add_string(list, "-fopenmp");
+		}
+		else if (strcmp(iname, "-acc") == 0
+			 && (phase == P_spin_cc1 || phase == P_spin_cc1plus)) {
+			add_string(list, "-fopenacc");
+			//NOW OPENACC is source2source
+			compiling_acc = TRUE;
+		}
+		else if (strcmp(iname, "-acc") == 0 && (phase == P_be)) {
+			add_string(list, "-enableacc");
+			add_string(list, "-PHASE:clist");
+			add_string(list, "-CLIST:emit_nested_pu");
+		}
+		else if (strcmp(iname, "-s2s") == 0 && (phase == P_be)) {
+			compiling_acc_s2s = TRUE;
+		}
+		else if (strncmp (iname, "-O", 2) == 0 && (phase == P_gcpp && compiling_acc)) 
+		{
+			return;
 		}
 		else
 			add_string(list, iname);
@@ -783,7 +803,7 @@ add_file_args_first (string_list_t *args, phases_t index)
       if (option_was_seen(O_pthread))
 	add_string(args, "-D_REENTRANT");
       #ifdef PSC_TO_OPEN64
-      if (!option_was_seen(O_no_opencc)) {
+      if (!option_was_seen(O_no_opencc) && !compiling_acc) {
 	add_string(args, "-D__OPEN64__=\"" OPEN64_FULL_VERSION "\"");
 	add_string(args, "-D__OPENCC__=" OPEN64_MAJOR_VERSION);
 	add_string(args, "-D__OPENCC_MINOR__=" OPEN64_MINOR_VERSION);
@@ -950,11 +970,11 @@ add_file_args (string_list_t *args, phases_t index)
 		
 		// Call gcc preprocessor using "gcc -E ...".
 		add_string(args, "-E");
-		if (sse2 == TRUE)
+		if (sse2 == TRUE && !compiling_acc)
 			add_string(args, "-msse2");
-		else if(sse == TRUE)
+		else if(sse == TRUE && !compiling_acc)
 			add_string(args, "-msse");
-		else if(mmx == TRUE)
+		else if(mmx == TRUE && !compiling_acc)
 			add_string(args, "-mmmx");
                 
 
@@ -2389,10 +2409,12 @@ post_fe_phase (void)
     // from the front-end.  Bug 11325
     else if (run_inline != UNDEFINED)
       return run_inline == TRUE ? P_inline : be_phase;
+	else if(compiling_acc == TRUE)
+	  return be_phase;		
     else if (inline_t == TRUE || inline_t == UNDEFINED)
-	return P_inline;
+	  return P_inline;
     else
-	return be_phase;
+	  return be_phase;
 } /* post_fe_phase */
     
 /* If -INLINE:%s option was seen, pass it to ld if ipa run, or inline if
@@ -2674,7 +2696,15 @@ determine_phase_order (void)
 			add_phase(next_phase);
                         if (cordflag==TRUE) {
 			   next_phase = P_cord;
-			} else {
+			} 
+			/*else if(compiling_acc&&!compiling_acc_s2s)
+			{
+				//run GPU compiler to generate PTX from CUDA source, if s2s is disabled.
+				add_phase(P_nvcc);
+				add_phase(P_NONE);
+				next_phase = P_NONE;
+			}*/
+			else {
 			  add_phase(P_NONE);
 			  next_phase = P_NONE;
 			}
@@ -3369,6 +3399,11 @@ run_compiler (int argc, char *argv[])
 	        if (run_inline == FALSE &&	// bug 11325
 		    phase_order[i] == P_inline)
 		    continue;
+
+			//NOW OPENACC source2source is used, p_gas, p_gld is not allowed
+			if((phase_order[i] > P_be) 
+				&& (compiling_acc == TRUE) && compiling_acc_s2s == TRUE)
+				continue;
 
 		if (is_matching_phase(get_phase_mask(phase_order[i]), P_any_ld)) {
 			source_kind = S_o;

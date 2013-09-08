@@ -142,6 +142,24 @@ static void no_args(void)
 boolean Dragon_Flag;
 #endif
 
+extern boolean compiling_acc;
+extern boolean compiling_acc_s2s;
+static void check_openacc_flags(int argc, char **argv)
+{
+	int i;
+
+    for (i = 0; i < argc; i++) 
+	{
+		if (argv[i])
+		{
+			if(!strcmp(argv[i], "-fopenacc") || !strcmp(argv[i], "-acc"))
+				compiling_acc = TRUE;
+			else if(!strcmp(argv[i], "-s2s"))
+				compiling_acc_s2s = TRUE;
+		}
+    }
+}
+
 int 
 main (int argc, char *argv[])
 {
@@ -168,6 +186,8 @@ main (int argc, char *argv[])
 	append_default_options(&argc, &argv);
 
 	save_command_line(argc, argv);		/* for prelinker    */	
+	check_openacc_flags(argc, argv);
+	
 	files = init_string_list();
 	file_suffixes = init_string_list();
 	feedback_files = init_string_list ();	/* for cord feedback files */
