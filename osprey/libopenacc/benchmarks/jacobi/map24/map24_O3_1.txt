@@ -1,0 +1,10 @@
+======== NVPROF is profiling pgi_jacobi...
+======== Command: pgi_jacobi 2048 2048 20000
+c0 = 0.571794, c1 = 0.000463, c2 = 0.030677
+Final mean = 0.001069
+Time for computing: 13.50 s
+======== Profiling result:
+ Time(%)      Time   Calls       Avg       Min       Max  Name
+   99.87    12.72s   20000  636.00us  635.11us  637.16us  jacobi__56_gpu
+    0.09   10.91ms       2    5.45ms    5.45ms    5.46ms  [CUDA memcpy HtoD]
+    0.05    5.77ms       1    5.77ms    5.77ms    5.77ms  [CUDA memcpy DtoH]

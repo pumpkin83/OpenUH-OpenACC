@@ -1,0 +1,12 @@
+======== NVPROF is profiling pgi_gaussblur...
+======== Command: pgi_gaussblur 1024 1024 20000
+s0 = 0.571794, s1 = 0.001852, s2 = 0.122708
+s4 = 0.917154, s5 = 0.854015, s8 = 0.227550
+initial mean = 0.500103
+final mean = 0.499635
+Time for computing: 17.68 s
+======== Profiling result:
+ Time(%)      Time   Calls       Avg       Min       Max  Name
+   99.98    16.92s   20000  846.00us  845.00us  846.89us  gaussblur_43_gpu
+    0.02    2.73ms       2    1.37ms    1.37ms    1.37ms  [CUDA memcpy HtoD]
+    0.01    1.44ms       1    1.44ms    1.44ms    1.44ms  [CUDA memcpy DtoH]

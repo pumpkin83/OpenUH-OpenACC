@@ -1,0 +1,184 @@
+#include "cuda_runtime.h"
+#include "pgi_cuda_runtime.h"
+struct b1type{
+    int rr1;
+    };
+extern "C" __global__ __launch_bounds__(256) void
+test1_23_gpu(
+    int g3,
+    struct b1type* bb,
+    signed char* redbuf,
+    int tc3,
+    int tc4,
+    signed char* p8/* input */,
+    int x3/* NI */)
+{
+int _i_1, _i_2;
+long long _k8_1;
+signed char* _p_1;
+int r2;
+signed char* p9;
+int x4/* local_sum */;
+extern  __shared__ double S27[];
+int i30s;
+__shared__ signed char* rb33;
+int r36;
+__shared__ signed char* rb37;
+int rc14;
+int rc15;
+int* rb42;
+int j70;
+int j52;
+__shared__ int e53;
+p9 = redbuf;
+_i_1 = (g3)*(4);
+redbuf = (redbuf)+((long long)_i_1);
+r2 = 0;
+i30s = 0;
+if( ((0)>=(tc4)))  goto _BB_20;
+_BB_18: ;
+rb33 = (signed char*)(&S27);
+if( ((i30s)>=((tc4)-((int)((int)blockIdx.x)))))  goto _BB_23;
+r36 = 0;
+if( ((0)>=(tc3)))  goto _BB_34;
+j52 = ((tc3)-((int)((int)blockDim.x)))+((int)((int)blockDim.x));
+j70 = 0;
+_BB_32: ;
+rb37 = rb33;
+if( (((((int)((int)threadIdx.x))-(tc3))+(j70))>=0)) goto _BB_35;
+_k8_1 = ((long long)(((int)((int)threadIdx.x))+((x3/* NI */)*(((int)((int)blockIdx.x))+(i30s))))+(j70))*(4LL);
+r36 = (( int*)p8/* input */)[(long long)(((int)((int)threadIdx.x))+((x3/* NI */)*(((int)((int)blockIdx.x))+(i30s))))+(j70)]+(r36);
+_BB_35: ;
+j52 = (j52)+(-((int)((int)blockDim.x)));
+j70 = (j70)+((int)((int)blockDim.x));
+if( ((j52)>0)) goto _BB_32;
+_BB_34: ;
+_p_1 = ( signed char*)(((int*)(rb37))+((long long)(int)threadIdx.x));
+rb42 = ( int*)(( int*)_p_1);
+*( int*)(( int*)_p_1) = r36;
+_i_1 = ((int)((int)blockDim.x))-(1);
+rc14 = (_i_1)|((int)(_i_1)>>(1));
+rc14 = (rc14)|((int)(rc14)>>(2));
+rc14 = (rc14)|((int)(rc14)>>(4));
+_i_2 = rc14;
+rc14 = (_i_2)|((int)(_i_2)>>(8));
+rc14 = (rc14)+(1);
+rc15 = rc14;
+__syncthreads();
+_BB_40: ;
+if( ((1)>=(rc14)))  goto _BB_44;
+__syncthreads();
+rc14 = (int)((rc14)+(1))>>(1);
+if( (((((int)threadIdx.x)+(rc14))-(rc15))>=0)) goto _BB_43;
+*( int*)(rb42) = (*( int*)(rb42))+(*( int*)((rb42)+((long long)rc14)));
+_BB_43: ;
+rc15 = rc14;
+goto _BB_40;
+_BB_44: ;
+if( (((int)threadIdx.x)!=0)) goto _BB_49;
+x4/* local_sum */ = (*( int*)((int*)(rb37)));
+r2 = (x4/* local_sum */)+(r2);
+e53 = r2;
+__threadfence_block();
+_BB_49: ;
+__syncthreads();
+r2 = e53;
+_BB_23: ;
+i30s = ((int)((int)gridDim.x))+(i30s);
+if( ((tc4)>(i30s)))  goto _BB_18;
+_BB_20: ;
+_i_1 = ((int)blockIdx.x)*(4);
+(( int*)p9)[(int)blockIdx.x] = r2;
+}
+extern "C" __global__ __launch_bounds__(256) void
+test1_23_gpu_red(
+    int g3,
+    struct b1type* bb,
+    signed char* redbuf,
+    int tc3,
+    int tc4,
+    signed char* p8/* input */,
+    int x3/* NI */)
+{
+int _i_1, _i_2, _i_3;
+unsigned int _ui_1;
+signed char* _p_1;
+signed char* p9;
+extern  __shared__ double S27[];
+int* rb55;
+int rc4;
+int rc5;
+int rt0;
+int e63;
+int j45;
+signed char* j38;
+signed char* e66;
+p9 = redbuf;
+_i_1 = (g3)*(4);
+redbuf = (redbuf)+((long long)_i_1);
+if( ((-((int)((int)blockIdx.x)))!=0)) goto _BB_6;
+rt0 = 0;
+if( (((int)threadIdx.x)>=(g3)))  goto _BB_12;
+_i_1 = ((int)threadIdx.x)*(4);
+rt0 = (( int*)p9)[(int)threadIdx.x];
+e63 = ((int)threadIdx.x)+((int)((int)blockDim.x));
+_i_2 = (e63)*(4);
+e66 = (p9)+((long long)_i_2);
+j38 = e66;
+j45 = (e63)-(g3);
+_BB_10: ;
+if( ((j45)>=0)) goto _BB_12;
+_p_1 = ( signed char*)(j38);
+rt0 = (rt0)+(*( int*)(( signed char*)_p_1));
+_ui_1 = ((int)blockDim.x)*(4);
+j38 = (( signed char*)_p_1)+((long long)_ui_1);
+j45 = (j45)+((int)((int)blockDim.x));
+goto _BB_10;
+_BB_12: ;
+_p_1 = ( signed char*)(((int*)(&S27))+((long long)(int)threadIdx.x));
+rb55 = ( int*)(( int*)_p_1);
+*( int*)(( int*)_p_1) = rt0;
+rc4 = (int)blockDim.x;
+if( (((int)blockDim.x)<=(g3)))  goto _BB_14;
+_i_1 = (g3)-(1);
+rc4 = (_i_1)|((int)(_i_1)>>(1));
+rc4 = (rc4)|((int)(rc4)>>(2));
+rc4 = (rc4)|((int)(rc4)>>(4));
+_i_2 = rc4;
+rc4 = (_i_2)|((int)(_i_2)>>(8));
+_i_3 = rc4;
+rc4 = (_i_3)|((int)(_i_3)>>(16));
+rc4 = (rc4)+(1);
+_BB_14: ;
+rc5 = rc4;
+_BB_15: ;
+if( ((64)>=(rc4)))  goto _BB_19;
+__syncthreads();
+rc4 = (int)((rc4)+(1))>>(1);
+if( (((((int)threadIdx.x)+(rc4))-(rc5))>=0)) goto _BB_18;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)rc4)));
+_BB_18: ;
+rc5 = rc4;
+goto _BB_15;
+_BB_19: ;
+__syncthreads();
+if( (((int)threadIdx.x)>=(32)))  goto _BB_6;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)32)));
+__threadfence_block();
+if( (((int)threadIdx.x)>=(16)))  goto _BB_6;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)16)));
+__threadfence_block();
+if( (((int)threadIdx.x)>=(8)))  goto _BB_6;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)8)));
+__threadfence_block();
+if( (((int)threadIdx.x)>=(4)))  goto _BB_6;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)4)));
+__threadfence_block();
+if( (((int)threadIdx.x)>=(2)))  goto _BB_6;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)2)));
+__threadfence_block();
+if( (((int)threadIdx.x)>=(1)))  goto _BB_6;
+*( int*)(rb55) = (*( int*)(rb55))+(*( int*)((rb55)+((long long)1)));
+bb->rr1 = (bb->rr1)+(*( int*)(rb55));
+_BB_6: ;
+}

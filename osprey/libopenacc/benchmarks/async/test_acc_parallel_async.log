@@ -1,0 +1,258 @@
+######## OpenACC Validation Suite V 1.0a ######
+## Repetitions:  50                       ####
+## Loop Count :   1000                    ####
+##############################################
+Testing acc_parallel_async
+
+
+
+1. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+2. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+3. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+4. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+5. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+6. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+7. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+8. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+9. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+10. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+11. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+12. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+13. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+14. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+15. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+16. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+17. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+18. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+19. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+20. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+21. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+22. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+23. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+24. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+25. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+26. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+27. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+28. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+29. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+30. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+31. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+32. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+33. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+34. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+35. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+36. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+37. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+38. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+39. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+40. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+41. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+42. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+43. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+44. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+45. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+46. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+47. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+48. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+49. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+
+50. run of test_acc_parallel_async out of 50
+
+Test successful.
+
+Directive worked without errors.

@@ -222,6 +222,7 @@ static phase_info_t phase_info[] = {
    {'I',  0x0020000000000000LL,	"inc",	"/include",	FALSE, FALSE},	/* include */
    {'L',  0x0040000000000000LL,	"lib",	LIBPATH,	FALSE, FALSE},	/* library */
    {'L',  0x0080000000000000LL,	"alib",	ALTLIBPATH,	FALSE, FALSE},	/* alt_library */
+   //{'a',  0x0080000000000000LL,	"nvcc",	BINPATH,	FALSE, FALSE},	/* nvcc lib */
 };
 mask_t OPEN64_PHASE_MASK=
           0x0000f19fffffff90LL;

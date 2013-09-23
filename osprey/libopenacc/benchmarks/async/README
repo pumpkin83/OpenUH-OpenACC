@@ -1,0 +1,16 @@
+The result of kernel_async:
+
+Time for async computing: 12.29 s
+Time for host computing: 12.14 s
+Time for device computing: 0.16 s
+Device sum: 68719476736.000000
+Host sum: 268598944.000000
+
+
+nonmapped_async is an implementation that does not use mapped memory between host and device.
+The OpenACC async runtime implementation should be based on this example.
+
+stream_data_async is an implementation that uses mapped memory between host and device,
+but the performance is very poor. And the device pointer needs to be got by call cudaHostGetDevicePointer(). In the runtime library, we have already allocated device memory for the host data at the entry of the data directive. If we use mapped memory, we need to get another device pointer which may contradict with the the previous device pointer.
+
+kernel_async only make the kernel execution asynchronous to the host computation, while in nonmapped_async, all of memin, kernel, memout are in the same stream and they are asynchronous to the host computation.

@@ -1,0 +1,10 @@
+======== NVPROF is profiling pgi_laplacian...
+======== Command: pgi_laplacian 128 128 128 20000
+alpha = 0.571794, beta = 0.001852
+Final mean = 0.023136
+Time for computing: 11.55 s
+======== Profiling result:
+ Time(%)      Time   Calls       Avg       Min       Max  Name
+   99.92    10.79s   20000  539.69us  531.78us  546.12us  laplacian_43_gpu
+    0.05    5.48ms       2    2.74ms    2.74ms    2.74ms  [CUDA memcpy HtoD]
+    0.03    2.88ms       1    2.88ms    2.88ms    2.88ms  [CUDA memcpy DtoH]

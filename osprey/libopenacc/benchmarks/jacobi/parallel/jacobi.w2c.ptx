@@ -1,0 +1,139 @@
+	.version 1.4
+	.target sm_10, map_f64_to_f32
+	// compiled with /opt/cuda/5.0/open64/lib//be
+	// nvopencc 4.1 built on 2012-09-21
+
+	//-----------------------------------------------------------
+	// Compiling /tmp/tmpxft_0000550b_00000000-9_jacobi.w2c.cpp3.i (/tmp/ccBI#.h7coYy)
+	//-----------------------------------------------------------
+
+	//-----------------------------------------------------------
+	// Options:
+	//-----------------------------------------------------------
+	//  Target:ptx, ISA:sm_10, Endian:little, Pointer Size:64
+	//  -O3	(Optimization level)
+	//  -g0	(Debug level)
+	//  -m2	(Report advisories)
+	//-----------------------------------------------------------
+
+	.file	1	"<command-line>"
+	.file	2	"/tmp/tmpxft_0000550b_00000000-8_jacobi.w2c.cudafe2.gpu"
+	.file	3	"/opt/local/gcc/4.4.7/lib/gcc/x86_64-unknown-linux-gnu/4.4.7/include/stddef.h"
+	.file	4	"/opt/cuda/5.0/bin/../include/crt/device_runtime.h"
+	.file	5	"/opt/cuda/5.0/bin/../include/host_defines.h"
+	.file	6	"/opt/cuda/5.0/bin/../include/builtin_types.h"
+	.file	7	"/opt/cuda/5.0/bin/../include/device_types.h"
+	.file	8	"/opt/cuda/5.0/bin/../include/driver_types.h"
+	.file	9	"/opt/cuda/5.0/bin/../include/surface_types.h"
+	.file	10	"/opt/cuda/5.0/bin/../include/texture_types.h"
+	.file	11	"/opt/cuda/5.0/bin/../include/vector_types.h"
+	.file	12	"/opt/cuda/5.0/bin/../include/device_launch_parameters.h"
+	.file	13	"/opt/cuda/5.0/bin/../include/crt/storage_class.h"
+	.file	14	"jacobi.w2c.cu"
+	.file	15	"/opt/cuda/5.0/bin/../include/common_functions.h"
+	.file	16	"/opt/cuda/5.0/bin/../include/math_functions.h"
+	.file	17	"/opt/cuda/5.0/bin/../include/math_constants.h"
+	.file	18	"/opt/cuda/5.0/bin/../include/device_functions.h"
+	.file	19	"/opt/cuda/5.0/bin/../include/sm_11_atomic_functions.h"
+	.file	20	"/opt/cuda/5.0/bin/../include/sm_12_atomic_functions.h"
+	.file	21	"/opt/cuda/5.0/bin/../include/sm_13_double_functions.h"
+	.file	22	"/opt/cuda/5.0/bin/../include/sm_20_atomic_functions.h"
+	.file	23	"/opt/cuda/5.0/bin/../include/sm_35_atomic_functions.h"
+	.file	24	"/opt/cuda/5.0/bin/../include/sm_20_intrinsics.h"
+	.file	25	"/opt/cuda/5.0/bin/../include/sm_30_intrinsics.h"
+	.file	26	"/opt/cuda/5.0/bin/../include/sm_35_intrinsics.h"
+	.file	27	"/opt/cuda/5.0/bin/../include/surface_functions.h"
+	.file	28	"/opt/cuda/5.0/bin/../include/texture_fetch_functions.h"
+	.file	29	"/opt/cuda/5.0/bin/../include/texture_indirect_functions.h"
+	.file	30	"/opt/cuda/5.0/bin/../include/surface_indirect_functions.h"
+	.file	31	"/opt/cuda/5.0/bin/../include/math_functions_dbl_ptx1.h"
+
+
+	.entry __accrg_jacobi__1_1 (
+		.param .s32 __cudaparm___accrg_jacobi__1_1_ny,
+		.param .s32 __cudaparm___accrg_jacobi__1_1_nx,
+		.param .u64 __cudaparm___accrg_jacobi__1_1_w0,
+		.param .f64 __cudaparm___accrg_jacobi__1_1_c0,
+		.param .f64 __cudaparm___accrg_jacobi__1_1_c1,
+		.param .f64 __cudaparm___accrg_jacobi__1_1_c2,
+		.param .u64 __cudaparm___accrg_jacobi__1_1_w1)
+	{
+	.reg .u32 %r<21>;
+	.reg .u64 %rd<8>;
+	.reg .f64 %fd<19>;
+	.reg .pred %p<8>;
+	.loc	14	21	0
+$LDWbegin___accrg_jacobi__1_1:
+	.loc	14	36	0
+	cvt.s32.u16 	%r1, %ctaid.x;
+	mov.s32 	%r2, %r1;
+	ld.param.s32 	%r3, [__cudaparm___accrg_jacobi__1_1_ny];
+	sub.s32 	%r4, %r3, 1;
+	setp.le.s32 	%p1, %r4, %r1;
+	@%p1 bra 	$Lt_0_3330;
+	ld.param.s32 	%r5, [__cudaparm___accrg_jacobi__1_1_nx];
+	sub.s32 	%r6, %r5, 1;
+	cvt.s32.u16 	%r7, %tid.x;
+	setp.gt.s32 	%p2, %r6, %r7;
+	cvt.s32.u16 	%r8, %nctaid.x;
+$Lt_0_3842:
+ //<loop> Loop body line 36, nesting depth: 1, estimated iterations: unknown
+	.loc	14	39	0
+	mov.s32 	%r9, %r7;
+	@!%p2 bra 	$Lt_0_4098;
+	mov.s32 	%r10, 0;
+	setp.gt.s32 	%p3, %r2, %r10;
+	selp.s32 	%r11, 1, 0, %p3;
+	cvt.s32.u16 	%r12, %ntid.x;
+$Lt_0_4610:
+ //<loop> Loop body line 39, nesting depth: 2, estimated iterations: unknown
+	mov.s32 	%r13, 0;
+	set.gt.u32.s32 	%r14, %r9, %r13;
+	neg.s32 	%r15, %r14;
+	and.b32 	%r16, %r15, %r11;
+	mov.u32 	%r17, 0;
+	setp.eq.s32 	%p4, %r16, %r17;
+	@%p4 bra 	$Lt_0_4866;
+	.loc	14	36	0
+	ld.param.s32 	%r5, [__cudaparm___accrg_jacobi__1_1_nx];
+	.loc	14	53	0
+	mul.lo.s32 	%r18, %r2, %r5;
+	add.s32 	%r19, %r9, %r18;
+	cvt.s64.s32 	%rd1, %r19;
+	mul.wide.s32 	%rd2, %r19, 8;
+	ld.param.u64 	%rd3, [__cudaparm___accrg_jacobi__1_1_w0];
+	add.u64 	%rd4, %rd3, %rd2;
+	ld.global.f64 	%fd1, [%rd4+8];
+	ld.global.f64 	%fd2, [%rd4+-8];
+	ld.global.f64 	%fd3, [%rd4+0];
+	ld.param.f64 	%fd4, [__cudaparm___accrg_jacobi__1_1_c1];
+	add.f64 	%fd5, %fd2, %fd2;
+	add.f64 	%fd6, %fd1, %fd5;
+	add.f64 	%fd7, %fd1, %fd6;
+	mul.f64 	%fd8, %fd4, %fd7;
+	ld.param.f64 	%fd9, [__cudaparm___accrg_jacobi__1_1_c0];
+	mad.rn.f64 	%fd10, %fd3, %fd9, %fd8;
+	ld.param.f64 	%fd11, [__cudaparm___accrg_jacobi__1_1_c2];
+	ld.global.f64 	%fd12, [%rd4+16];
+	ld.global.f64 	%fd13, [%rd4+-16];
+	add.f64 	%fd14, %fd13, %fd3;
+	add.f64 	%fd15, %fd3, %fd14;
+	add.f64 	%fd16, %fd12, %fd15;
+	mad.rn.f64 	%fd17, %fd11, %fd16, %fd10;
+	ld.param.u64 	%rd5, [__cudaparm___accrg_jacobi__1_1_w1];
+	add.u64 	%rd6, %rd5, %rd2;
+	st.global.f64 	[%rd6+0], %fd17;
+$Lt_0_4866:
+	add.s32 	%r9, %r9, %r12;
+	setp.gt.s32 	%p5, %r6, %r9;
+	@%p5 bra 	$Lt_0_4610;
+$Lt_0_4098:
+	add.s32 	%r2, %r2, %r8;
+	setp.gt.s32 	%p6, %r4, %r2;
+	@%p6 bra 	$Lt_0_3842;
+$Lt_0_3330:
+	.loc	14	59	0
+	exit;
+$LDWend___accrg_jacobi__1_1:
+	} // __accrg_jacobi__1_1
+

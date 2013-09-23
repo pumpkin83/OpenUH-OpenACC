@@ -278,6 +278,7 @@ add_implied_string (string_list_t *list, int iflag, int flag, phases_t phase)
 			add_string(list, "-CLIST:emit_nested_pu");
 		}
 		else if (strcmp(iname, "-s2s") == 0 && (phase == P_be)) {
+			add_string(list, "-s2s");
 			compiling_acc_s2s = TRUE;
 		}
 		else if (strncmp (iname, "-O", 2) == 0 && (phase == P_gcpp && compiling_acc)) 

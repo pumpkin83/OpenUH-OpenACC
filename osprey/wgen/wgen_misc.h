@@ -175,4 +175,5 @@ Get_Srcpos (void)
 #endif
 
 extern BOOL g_bOffloadRegion;
+extern BOOL g_bOpenACCS2S_flag;
 #endif

@@ -3019,10 +3019,20 @@ WN2C_Append_Symtab_Types(TOKEN_BUFFER tokens, UINT lines_between_decls)
 	 if (tokens != NULL)
 	    Append_And_Reclaim_Token_List(tokens, &tmp_tokens);
 	 else
+	 {
+	 	TOKEN_BUFFER tmp_tokens2 = New_Token_Buffer();
+		Append_And_Copy_Token_List(tmp_tokens2, tmp_tokens);
 	    Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
 				     NULL, /* No srcpos map */
 				     &tmp_tokens);
-      }
+	    //Write_And_Reclaim_Tokens(W2C_File[W2C_GPUH_FILE], 
+		//		     NULL, /* No srcpos map */
+		//		     &tmp_tokens2);
+	    //Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
+		//		     NULL, /* No srcpos map */
+		//		     &tmp_tokens);
+	 }
+    }
    }
 }  /* WN2C_Append_Symtab_Types */
 
@@ -3307,6 +3317,7 @@ static TY_IDX WN2C_get_base_type(TY_IDX idx) {
   }
 }
 
+
 static void
 WN2C_Append_Symtab_Vars(TOKEN_BUFFER tokens, 
 			INT          lines_between_decls,
@@ -3328,51 +3339,132 @@ WN2C_Append_Symtab_Vars(TOKEN_BUFFER tokens,
     * global definition or that have been referenced in this 
     * compilation unit.
     */
-   FOREACH_SYMBOL(CURRENT_SYMTAB, st, st_idx)
-   {
-      TY_IDX st_ty  = ST_class(st) == CLASS_VAR ? ST_type(st) :
-      ST_class(st) == CLASS_FUNC ? ST_pu_type(st) : ST_type(st);
-      if (!ST_is_not_used(st)                         &&
-	  ST_sclass(st) != SCLASS_FORMAL              && 
-	  ST_sclass(st) != SCLASS_FORMAL_REF          &&
-	  ((ST_sym_class(st) == CLASS_VAR && !ST_is_const_var(st)) || 
-	   ST_sym_class(st) == CLASS_FUNC)            &&
-	  !Stab_Reserved_St(st)                       &&
-	  !Stab_Is_Based_At_Common_Or_Equivalence(st) &&
+    
+   if(CURRENT_SYMTAB != GLOBAL_SYMTAB)
+   	{
+	   FOREACH_SYMBOL(CURRENT_SYMTAB, st, st_idx)
+	   {
+	      TY_IDX st_ty  = ST_class(st) == CLASS_VAR ? ST_type(st) :
+	      ST_class(st) == CLASS_FUNC ? ST_pu_type(st) : ST_type(st);
+	      if (!ST_is_not_used(st)                         &&
+		  ST_sclass(st) != SCLASS_FORMAL              && 
+		  ST_sclass(st) != SCLASS_FORMAL_REF          &&
+		  ((ST_sym_class(st) == CLASS_VAR && !ST_is_const_var(st)) || 
+		   ST_sym_class(st) == CLASS_FUNC)            &&
+		  !Stab_Reserved_St(st)                       &&
+		  !Stab_Is_Based_At_Common_Or_Equivalence(st) &&
 #ifndef TARG_NVISA // emit common blocks like threadIdx
-	  !Stab_Is_Common_Block(st)                   &&
+		  !Stab_Is_Common_Block(st)                   &&
 #endif
-	  !Stab_Is_Equivalence_Block(st)              &&
-	  (Stab_External_Def_Linkage(st)                        || 
-	   (ST_sym_class(st) == CLASS_VAR && ST_sclass(st) == SCLASS_CPLINIT) ||
-	   BE_ST_w2fc_referenced(st)))
-      {
-	 tmp_tokens = New_Token_Buffer();
-	 if (ST_is_weak_symbol(st))
-	 {
-	    ST2C_weakext_translate(tmp_tokens, st, context);
-	 }
-	 else
-	 {
-	    ST2C_decl_translate(tmp_tokens, st, context);
-	    Append_Token_Special(tmp_tokens, ';');
-	 }
-	 Append_Indented_Newline(tmp_tokens, lines_between_decls);
-	 if (tokens != NULL)
-	    Append_And_Reclaim_Token_List(tokens, &tmp_tokens);
-	 else
-	 {
-	 	//TOKEN_BUFFER tmp_tokens2 = New_Token_Buffer();
-		//Append_And_Copy_Token_List(tmp_tokens2, tmp_tokens);
-	    Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
-				     NULL, /* No srcpos map */
-				     &tmp_tokens);
-	    //Write_And_Reclaim_Tokens(W2C_File[W2C_GPUH_FILE], 
-		//		     NULL, /* No srcpos map */
-		//		     &tmp_tokens2);
-	 }
-      }
-   }
+		  !Stab_Is_Equivalence_Block(st)              &&
+		  (Stab_External_Def_Linkage(st)                        || 
+		   (ST_sym_class(st) == CLASS_VAR && ST_sclass(st) == SCLASS_CPLINIT) ||
+		   BE_ST_w2fc_referenced(st)))
+	      {
+			 tmp_tokens = New_Token_Buffer();
+			 if (ST_is_weak_symbol(st))
+			 {
+			    ST2C_weakext_translate(tmp_tokens, st, context);
+			 }
+			 else
+			 {
+			    ST2C_decl_translate(tmp_tokens, st, context);
+			    Append_Token_Special(tmp_tokens, ';');
+			 }
+			 Append_Indented_Newline(tmp_tokens, lines_between_decls);
+			 if (tokens != NULL)
+			    Append_And_Reclaim_Token_List(tokens, &tmp_tokens);
+			 else
+			 {
+			 	//TOKEN_BUFFER tmp_tokens2 = New_Token_Buffer();
+				//Append_And_Copy_Token_List(tmp_tokens2, tmp_tokens);
+			    Write_And_Reclaim_Tokens(W2C_File[W2C_DOTC_FILE], 
+						     NULL, /* No srcpos map */
+						     &tmp_tokens);
+			    //Write_And_Reclaim_Tokens(W2C_File[W2C_GPUH_FILE], 
+				//		     NULL, /* No srcpos map */
+				//		     &tmp_tokens2);
+			 }		  
+	     }
+	   }
+   	}
+   else
+   	{
+   		//Src_File_Name
+   		//W2C_File_Name[W2C_ORIG_FILE]
+   		//char* sfname = Last_Pathname_Component(Src_File_Name);
+		FOREACH_SYMBOL(CURRENT_SYMTAB, st, st_idx)
+	   {
+	      TY_IDX st_ty  = ST_class(st) == CLASS_VAR ? ST_type(st) :
+	      ST_class(st) == CLASS_FUNC ? ST_pu_type(st) : ST_type(st);
+	      if (!ST_is_not_used(st)                         &&
+		  ST_sclass(st) != SCLASS_FORMAL              && 
+		  ST_sclass(st) != SCLASS_FORMAL_REF          &&
+		  ((ST_sym_class(st) == CLASS_VAR && !ST_is_const_var(st)) || 
+		   ST_sym_class(st) == CLASS_FUNC)            &&
+		  !Stab_Reserved_St(st)                       &&
+		  !Stab_Is_Based_At_Common_Or_Equivalence(st) &&
+#ifndef TARG_NVISA // emit common blocks like threadIdx
+		  !Stab_Is_Common_Block(st)                   &&
+#endif
+		  !Stab_Is_Equivalence_Block(st)              &&
+		  (Stab_External_Def_Linkage(st)                        || 
+		  (ST_sym_class(st) == CLASS_VAR && ST_sclass(st) == SCLASS_FSTATIC) ||
+		  (ST_sym_class(st) == CLASS_VAR && ST_sclass(st) == SCLASS_EXTERN) ||
+		   (ST_sym_class(st) == CLASS_VAR && ST_sclass(st) == SCLASS_CPLINIT) ||
+		   BE_ST_w2fc_referenced(st)))
+	      {
+		      //it is not necessary to generate the accr runtime declaration in the header files. 
+		      //Because there is runtime header has to be included in the generated source code. by daniel tian
+		      if(strncmp(ST_name(st), "__accr_", 7) == 0)
+			  	continue;
+			  if(strncmp(ST_name(st), "__accrg_", 8) == 0)
+			  	continue;
+			  if(strcmp(ST_name(st), "main") == 0)
+			  	continue;
+			  if(ST_is_ACC_device_func(st))
+					//Write_And_Reclaim_Tokens(W2C_File[W2C_GPU_FILE], 
+					//	     NULL, /* No srcpos map */
+					//	     &tmp_tokens);
+					continue;
+			  char* st_fname = ST_sfname(st);
+			  //the ST is not from current source code. WHIRL2C is not going to generate this ST. by Daniel Tian, for OpenACC
+			 if(strcmp(current_file_name, st_fname))
+			 		continue;
+			 
+			 tmp_tokens = New_Token_Buffer();
+			 if (ST_is_weak_symbol(st))
+			 {
+			    ST2C_weakext_translate(tmp_tokens, st, context);
+			 }
+			 else
+			 {
+			    ST2C_decl_translate(tmp_tokens, st, context);
+			    Append_Token_Special(tmp_tokens, ';');
+			 }
+			 Append_Indented_Newline(tmp_tokens, lines_between_decls);
+			 //if (tokens != NULL)
+			 //   Append_And_Reclaim_Token_List(tokens, &tmp_tokens);
+			 //else
+			 {
+			 	//TOKEN_BUFFER tmp_tokens2 = New_Token_Buffer();
+				//Append_And_Copy_Token_List(tmp_tokens2, tmp_tokens);
+				if(ST_is_ACC_device_func(st))
+					//Write_And_Reclaim_Tokens(W2C_File[W2C_GPU_FILE], 
+					//	     NULL, /* No srcpos map */
+					//	     &tmp_tokens);
+					continue;
+				else
+					Write_And_Reclaim_Tokens(W2C_File[W2C_DOTC_FILE], 
+						     NULL, /* No srcpos map */
+						     &tmp_tokens);
+			    //Write_And_Reclaim_Tokens(W2C_File[W2C_GPUH_FILE], 
+				//		     NULL, /* No srcpos map */
+				//		     &tmp_tokens2);
+			 }		  
+	     }
+	   }
+   	}
 } /* WN2C_Append_Symtab_Vars */
 
 
@@ -5997,7 +6089,7 @@ WN2C_array(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
 
    Is_True(WN_operator(wn) == OPR_ARRAY,
 	   ("Invalid operator for WN2C_array()"));
-
+   UINT32 idim = WN_num_dim(wn);
    vector<WN*> array_dims;
    
    bool has_ptr_arith = false;
@@ -6181,8 +6273,8 @@ WN2C_array(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
 	 Clear_TY_ptr_as_array(Ty_Table[base_ty]);  /* Reset w2c side-effect! */
       ety = TY_pointed(base_ty);
 	  //In the kernel function, we don't need the parenthesize symbol., by daniel tian
-	  if(!isGPUKernelFunc)
-      	WHIRL2C_parenthesize(tmp_tokens);
+	  //if(!isGPUKernelFunc)
+      //WHIRL2C_parenthesize(tmp_tokens);
    }
    else if (!TY_Is_Pointer(base_ty))
    {
@@ -6228,8 +6320,8 @@ WN2C_array(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
    CONTEXT_reset_needs_lvalue(context);
 
    /* Append the index expressions */
-   if (treat_ptr_as_array || 
-       Stab_Array_Has_Dynamic_Bounds(TY_pointed(base_ty)))
+   if ((treat_ptr_as_array || 
+       Stab_Array_Has_Dynamic_Bounds(TY_pointed(base_ty))) && idim<2)
    {
       /* The array has been declared as a pointer to the element types,
        * so use calculated offsets based on the element-type.
@@ -7399,7 +7491,7 @@ WN2C_translate_file_scope_defs(CONTEXT context)
 #if 0
    //WEI: don't see why this needs to be called
 #endif
-   Write_String(W2C_File[W2C_DOTH_FILE], NULL/* No srcpos map */,
+   Write_String(W2C_File[W2C_DOTC_FILE], NULL/* No srcpos map */,
 		"/* File-level vars and routines */\n");
    WN2C_Append_Symtab_Vars(NULL, /* token_buffer */
 			   2,    /* lines between decls */

@@ -1015,16 +1015,51 @@ static void TY2C_Output_Struct_Type(TY_IDX ty,
     TY2C_complete_struct(tmp_tokens, ty, context);
     Append_Token_Special(tmp_tokens, ';'); 
     Append_Indented_Newline(tmp_tokens, lines_between_decls);
-	
- 	TOKEN_BUFFER tmp_tokens2 = New_Token_Buffer();
-	Append_And_Copy_Token_List(tmp_tokens2, tmp_tokens);
-	
-    Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
+
+	if(W2C_File[W2C_DOTH_FILE])
+    	Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
 			     NULL,
 			     &tmp_tokens);
-    Write_And_Reclaim_Tokens(W2C_File[W2C_GPUH_FILE], 
+   // CONTEXT_set_incomplete_ty2c(context); //Liao
+    //}
+}
+
+
+static hash_set<TY_IDX> cuda_struct_ty;
+//If the given type is a user-defined struct, 
+//This function outputs it complete declaration to the w2c.h file
+static void TY2CUDA_Output_Struct_Type(TY_IDX ty,
+			     INT lines_between_decls,
+			     CONTEXT context) {
+
+  // this was commented out before in OpenUH */
+  if (cuda_struct_ty.find(ty) != cuda_struct_ty.end()) {
+    //don't output duplicate struct definitions
+    return;
+  }
+
+  //it seems that the intention here is to avoid writing duplicate declarations
+  //for structs that appear as both local and shared types.
+  //However - if  they appear only as shared we do not get any types printed - we
+  //need them for debug. The above test should be strong enough ...
+  //if (!TY_is_shared(ty)) {
+    Set_TY_is_translated_to_cuda(ty);  //need to force all later struct type decl to be incomplete
+    cuda_struct_ty.insert(ty);
+ 
+
+    TOKEN_BUFFER tmp_tokens = New_Token_Buffer(); 
+    CONTEXT_reset_incomplete_ty2c(context); 
+    TY2C_complete_struct(tmp_tokens, ty, context);
+    Append_Token_Special(tmp_tokens, ';'); 
+    Append_Indented_Newline(tmp_tokens, lines_between_decls);
+	
+    //Write_And_Reclaim_Tokens(W2C_File[W2C_DOTH_FILE], 
+	//		     NULL,
+	//		     &tmp_tokens);
+	//if(isGPUKernelFunc)
+    Write_And_Reclaim_Tokens(W2C_File[W2C_GPU_FILE], 
 			     NULL, /* No srcpos map */
-			     &tmp_tokens2);
+			     &tmp_tokens);
    // CONTEXT_set_incomplete_ty2c(context); //Liao
     //}
 }
@@ -1039,10 +1074,17 @@ TY2C_struct(TOKEN_BUFFER decl_tokens, TY_IDX ty, CONTEXT context)
 {
   BOOL    declare_incomplete ; 
   declare_incomplete = CONTEXT_incomplete_ty2c(context) ;
-  if (( !declare_incomplete) && (!TY_is_translated_to_c(ty)) ) {
+  char* src_fname = TY_sfname(ty);
+  //if (( !declare_incomplete) && (!TY_is_translated_to_c(ty)) ) {
+  if ((!TY_is_translated_to_c(ty)) && !strcmp(src_fname, current_file_name)) {
     //Add this struct type to the global w2c.h
     CONTEXT_reset_incomplete_ty2c (context);
     TY2C_Output_Struct_Type(ty, 1, context);
+  } 
+  if ((isGPUKernelFunc && !TY_is_translated_to_cuda(ty)) ) {
+    //Add this struct type to the global w2c.h
+    CONTEXT_reset_incomplete_ty2c (context);
+    TY2CUDA_Output_Struct_Type(ty, 1, context);
   } 
 #ifdef COMPILE_UPC  
   //if (Compile_Upc) {

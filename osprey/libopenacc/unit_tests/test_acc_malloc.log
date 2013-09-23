@@ -1,0 +1,10 @@
+######## OpenACC Validation Suite V 1.0a ######
+## Repetitions:  50                       ####
+## Loop Count :   1000                    ####
+##############################################
+Testing acc_malloc
+
+
+
+1. run of test_acc_malloc out of 50
+

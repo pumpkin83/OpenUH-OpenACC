@@ -1,0 +1,11 @@
+======== NVPROF is profiling pgi_stencil...
+======== Command: pgi_stencil 512 512 64 100
+OpenACC-based 7 points stencil codes****
+Original version by Rengan Xu <uhxrg@cs.uh.edu>
+This version maintained by Rengan Xu  ***********
+The stencil execution time: 0.46 s
+======== Profiling result:
+ Time(%)      Time   Calls       Avg       Min       Max  Name
+   86.11  208.79ms     100    2.09ms    2.09ms    2.09ms  cpu_stencil_57_gpu
+    9.15   22.18ms       2   11.09ms   10.96ms   11.22ms  [CUDA memcpy HtoD]
+    4.74   11.50ms       1   11.50ms   11.50ms   11.50ms  [CUDA memcpy DtoH]

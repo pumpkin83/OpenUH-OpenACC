@@ -145,6 +145,13 @@ Set_ST_name_idx (ST& s, STR_IDX idx)	{ s.u1.name_idx = idx; }
 inline char *
 ST_name (const ST& s)			{ return &Str_Table[ST_name_idx (s)]; }
 
+inline STR_IDX
+ST_sfname_idx (const ST& s)		{ return s.src_fname_idx; }
+inline void
+Set_ST_sfname_idx (ST& s, STR_IDX idx)	{ s.src_fname_idx = idx; }
+inline char *
+ST_sfname (const ST& s)			{ return &Str_Table[ST_sfname_idx (s)]; }
+
 inline TCON_IDX
 ST_tcon (const ST& s)			{ return s.u1.tcon; }
 inline void
@@ -1392,6 +1399,24 @@ Set_TY_name_idx (TY_IDX tyi, UINT64 name)   {
 }
 inline char *
 TY_name (const TY& ty)			{ return &Str_Table[ty.name_idx]; }
+
+//this is for store the TY info, there is this ty comes from. By Daniel, for source2source
+inline STR_IDX
+TY_sfname_idx (const TY& ty)		{ return ty.src_fname_idx; }
+inline void
+Set_TY_sfname_idx (TY& ty, UINT64 name)	{ ty.src_fname_idx = name; }
+inline STR_IDX
+TY_sfname_idx (const TY_IDX tyi)      { return TY_sfname_idx(Ty_Table[tyi]); }
+inline void
+Set_TY_sfname_idx (TY_IDX tyi, UINT64 name)   {
+  Set_TY_sfname_idx(Ty_Table[tyi], name);
+}
+inline char *
+TY_sfname (const TY& ty)			{ return &Str_Table[ty.src_fname_idx]; }
+
+inline char *
+TY_sfname (TY_IDX tyi)			{ return &Str_Table[TY_sfname_idx(Ty_Table[tyi])]; }
+
 
 inline TY_IDX
 TY_etype (const TY& ty)			{ return ty.Etype (); }

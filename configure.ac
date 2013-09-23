@@ -749,7 +749,7 @@ fi
 if test "${BUILD_TARGET}" = "SL"; then
   LIBLIST="include"
 elif test "${BUILD_TARGET}" = "IA64"; then
-  LIBLIST="include libopenmp libmv libopenmp-pcl"
+  LIBLIST="include libopenmp libopenacc libmv libopenmp-pcl"
   if test "${BUILD_FORTRAN}" = "YES"; then
      LIBLIST="$LIBLIST libfortran libu"
      if test "${ENABLE_COARRAYS}" = "YES"; then
@@ -760,7 +760,7 @@ elif test "${BUILD_TARGET}" = "IA64"; then
      fi
   fi
 else
-  LIBLIST="include libopenmp libhugetlbfs libmv libopenmp-pcl"
+  LIBLIST="include libopenmp libopenacc libhugetlbfs libmv libopenmp-pcl"
   if test "${BUILD_FORTRAN}" = "YES"; then
      LIBLIST="$LIBLIST libfortran libu"
      if test "${ENABLE_COARRAYS}" = "YES"; then
@@ -784,6 +784,7 @@ AC_CONFIG_FILES([
 else
 AC_CONFIG_FILES([
   osprey/targdir_lib/libopenmp/Makefile
+  osprey/targdir_lib/libopenacc/Makefile
   osprey/targdir_lib/libopenmp-pcl/Makefile
   osprey/targdir_lib/libhugetlbfs/Makefile
   osprey/targdir_lib/libmv/Makefile
@@ -837,6 +838,7 @@ if test $BUILD_MULTILIB = "YES"; then
   AC_CONFIG_FILES([
     osprey/targdir_lib2/Makefile:osprey/targdir_lib/Makefile.in
     osprey/targdir_lib2/include/Makefile:osprey/targdir_lib/include/Makefile.in
+    osprey/targdir_lib2/libopenacc/Makefile:osprey/targdir_lib/libopenacc/Makefile.in
     osprey/targdir_lib2/libopenmp/Makefile:osprey/targdir_lib/libopenmp/Makefile.in
     osprey/targdir_lib2/libopenmp-pcl/Makefile:osprey/targdir_lib/libopenmp-pcl/Makefile.in
     osprey/targdir_lib2/libhugetlbfs/Makefile:osprey/targdir_lib/libhugetlbfs/Makefile.in

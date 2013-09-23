@@ -241,6 +241,7 @@ extern void WHIRL2C_parenthesize(TOKEN_BUFFER tokens);
 
 extern int compiling_upc_flag;
 extern BOOL isGPUKernelFunc;
+const extern char* current_file_name;
 
 struct eqstr {
   bool operator()(const char* s1, const char* s2) const

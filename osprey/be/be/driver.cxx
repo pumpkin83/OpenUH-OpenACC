@@ -508,12 +508,17 @@ Phase_Init (void)
     if ( Opt_Level > 0 ) /* run VHO at -O1 and above */
         Vho_Init ();
     if (Run_w2c)
-	W2C_Outfile_Init (TRUE/*emit_global_decls*/);
+	{
+		if(run_ACCS2S)
+			W2C_Outfile_Init (TRUE);
+		else
+			W2C_Outfile_Init_OpenACC(TRUE);
+    }
     if (Run_w2f)
 	W2F_Outfile_Init ();
     if ((Run_lno || Run_preopt) && !Run_cg && !Run_wopt)
 	need_lno_output = TRUE;
-    if (Run_wopt && !Run_cg)
+    if (Run_wopt && !Run_cg && !run_ACCS2S)
 	need_wopt_output = TRUE;
 
     if (Run_ipl) {
@@ -575,7 +580,13 @@ Phase_Fini (void)
 
     /* Always finish w2c and w2f first */
     if (Run_w2c)
-	W2C_Outfile_Fini (TRUE/*emit_global_decls*/);
+	{
+		if(run_ACCS2S)
+			W2C_Outfile_Fini (TRUE);
+		else
+			W2C_Outfile_Fini_OpenACC(TRUE);
+    }
+	
     if (Run_w2f)
 	W2F_Outfile_Fini ();
 
@@ -928,9 +939,11 @@ Post_LNO_Processing (PU_Info *current_pu, WN *pu)
     /* Only run w2c and w2f on top-level PUs, unless otherwise requested.
      */
      //Added by daniel tian, for OpenACC
-     char* funname = ST_name(WN_st(pu));
-	 BOOL isUselessInW2C = !strncmp("gnu_dev_", funname, 8);
-    if (Run_w2c && !Run_w2fc_early && !isUselessInW2C) {
+     	 //DONT OUTPUT external source code.
+	 if(strcmp(Src_File_Name, ST_sfname(WN_st(pu))))
+	 	return;
+
+    if (Run_w2c && !Run_w2fc_early) {
       // Liao, add -CLIST:before_cg to control whirl2c before CG after wopt
       if (!W2C_Should_Before_CG()) { // the order of two IF matters here!
         if (W2C_Should_Emit_Nested_PUs() || is_user_visible_pu) {
@@ -1391,7 +1404,9 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
 	    done_first_pu = TRUE;
 	}
     }
-
+	
+  BOOL isOpenACCRegion = PU_acc(Get_Current_PU());
+  
 #ifdef KEY
     BOOL need_options_pop = FALSE;
 
@@ -1489,6 +1504,7 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
     /* First round output (.N file, w2c, w2f, etc.) */
     Set_Error_Phase ( "Post LNO Processing" );
     Post_LNO_Processing (current_pu, pu);
+	if(isOpenACCRegion) return;
     if (!Run_wopt && !Run_cg) return;
 
 #ifdef KEY // bug 7741

@@ -279,9 +279,10 @@ extern void W2C_Translate_Wn(FILE *outfile, const WN *wn);
 extern void W2C_Translate_Wn_Str(char *strbuf, UINT bufsize, const WN *wn);
 
 extern void W2C_Outfile_Init(BOOL emit_global_decls);
+extern void W2C_Outfile_Init_OpenACC(BOOL emit_global_decls);
 extern void W2C_Outfile_Translate_Pu(WN *pu, BOOL emit_global_decls);
 extern void W2C_Outfile_Fini(BOOL emit_global_decls);
-
+extern void W2C_Outfile_Fini_OpenACC(BOOL emit_global_decls);
 extern void W2C_Cleanup(void);
 
 }

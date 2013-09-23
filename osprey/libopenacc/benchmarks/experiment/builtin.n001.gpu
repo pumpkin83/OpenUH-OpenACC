@@ -1,0 +1,46 @@
+#include "cuda_runtime.h"
+#include "pgi_cuda_runtime.h"
+extern "C" __global__ __launch_bounds__(128) void
+main_27_gpu(
+    int tc2,
+    signed char* p3/* a */,
+    signed char* p4/* b */)
+{
+int _i_1;
+unsigned int _ui_1;
+float Rb_19;
+float Ra_20;
+unsigned int e25;
+unsigned int e27;
+unsigned int e30;
+unsigned int e33;
+int j44;
+int j43;
+int j42;
+unsigned int e40;
+e27 = ((int)threadIdx.x)*(4);
+e25 = ((int)blockIdx.x)*(128);
+e30 = ((e25)*(4))+(e27);
+e33 = ((int)gridDim.x)*(128);
+e40 = (e33)*(4);
+if( ((0)>=(tc2)))  goto _BB_6;
+_ui_1 = ((int)gridDim.x)*(128);
+j42 = ((tc2)-((int)(_ui_1)))+((int)(_ui_1));
+j43 = 0;
+j44 = 0;
+_BB_8: ;
+if( (((j44)-(tc2))>=0)) goto _BB_9;
+if( ((((((int)((int)threadIdx.x))-(tc2))+((int)(((int)blockIdx.x)*(128))))+(j44))>=0)) goto _BB_9;
+_i_1 = ((int)(e30))+(j43);
+Ra_20 = (*( float*)((p3/* a */)+((long long)(_i_1))));
+(Ra_20)+(1.00000000e+00f);
+Rb_19 = (cosf((Ra_20)+(1.00000000e+00f)))+(sinf(Ra_20));
+*( float*)((p4/* b */)+((long long)(_i_1))) = Rb_19;
+_BB_9: ;
+_ui_1 = ((int)gridDim.x)*(128);
+j42 = (j42)+(-((int)(_ui_1)));
+j43 = (j43)+((int)(e40));
+j44 = (j44)+((int)(_ui_1));
+if( ((j42)>0)) goto _BB_8;
+_BB_6: ;
+}

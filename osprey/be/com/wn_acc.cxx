@@ -272,7 +272,8 @@ typedef enum {
 	ACCR_UPDATE_DEVICE_VARIABLE 	= 32,
 	ACCR_WAIT_SOME_OR_ALL_STREAM	= 33,
 	ACCR_SYNCTHREADS				= 34, //this one is only used in kernel functions
-	ACCRUNTIME_LAST 		= ACCR_SYNCTHREADS
+	ACCR_PRINTF_DBG				= 35,
+	ACCRUNTIME_LAST 		= ACCR_PRINTF_DBG
 } OACCRUNTIME;
 
 static const char *accr_names [ACCRUNTIME_LAST + 1] = {
@@ -310,7 +311,8 @@ static const char *accr_names [ACCRUNTIME_LAST + 1] = {
   "__accr_update_host_variable",
   "__accr_update_device_variable",
   "__accr_wait_some_or_all_stream",
-  "__syncthreads"
+  "__syncthreads",
+  "printf"
 };
 
 
@@ -353,7 +355,8 @@ static ST_IDX accr_sts [ACCRUNTIME_LAST + 1] = {
   ST_IDX_ZERO, 	/*ACCR_UPDATE_HOST_VARIABLE*/
   ST_IDX_ZERO,	/*ACCR_UPDATE_DEVICE_VARIABLE*/
   ST_IDX_ZERO,	/*ACCR_WAIT_SOME_OR_ALL_STREAM*/
-  ST_IDX_ZERO	/*ACCR_SYNCTHREADS*/
+  ST_IDX_ZERO,	/*ACCR_SYNCTHREADS*/
+  ST_IDX_ZERO	/*FOR DEBUG*/
 };
 
 
@@ -1613,15 +1616,19 @@ Gen_DeviceMalloc( ST* st_hmem, ST *st_dmem, WN* wnSize)
 	WN_Set_Call_Non_Parm_Mod(wn);
 	WN_Set_Call_Non_Parm_Ref(wn);
 	WN_Set_Call_Parm_Ref(wn);
+
 	
-  	wnx = WN_Ldid(Pointer_type, 0, st_hmem, ST_type(st_hmem));	
+	if(TY_kind(ST_type(st_hmem)) == KIND_ARRAY)
+		wnx = WN_Lda( Pointer_type, 0, st_hmem);
+	else
+  		wnx = WN_Ldid(Pointer_type, 0, st_hmem, Be_Type_Tbl(Pointer_type));	
     WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
                        WN_ty(wnx), WN_PARM_BY_VALUE);
 	
 	wnx = WN_Lda( Pointer_type, 0, st_dmem);
     WN_kid(wn, 1) = WN_CreateParm(Pointer_type, wnx, 
                        WN_ty(wnx), WN_PARM_BY_REFERENCE);
-  
+  	//
 	WN_kid(wn, 2) = WN_CreateParm(MTYPE_U4, wnSize, 
 		  Be_Type_Tbl(MTYPE_U4), WN_PARM_BY_VALUE);
 	
@@ -1644,7 +1651,7 @@ Gen_DataD2H (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
   WN_Set_Call_Parm_Ref(wn);
   WN_linenum(wn) = acc_line_number;
 
-  wnx = WN_Ldid(Pointer_type, 0, Src, ST_type(Src));
+  wnx = WN_Ldid(Pointer_type, 0, Src, Be_Type_Tbl(Pointer_type));
 
 
   //WN* multiArrayT; //
@@ -1653,8 +1660,11 @@ Gen_DataD2H (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
   WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
                        WN_ty(wnx), WN_PARM_BY_VALUE);
 
-  //if the host is multi dim array, it will be different
-  wnx = WN_Ldid(Pointer_type, 0, Dst, ST_type(Dst));
+  //if the host is multi dim array, it will be different  
+	if(TY_kind(ST_type(Dst)) == KIND_ARRAY)
+		wnx = WN_Lda( Pointer_type, 0, Dst);
+	else
+  		wnx = WN_Ldid(Pointer_type, 0, Dst, Be_Type_Tbl(Pointer_type));
   //if(ACC_Get_Array_TotalDim(wnx) > 1)
   //	wnx = ACC_Load_MultiDimArray_StartAddr(wnx);
   //wnx = WN_Lda( Pointer_type, 0, Dst);
@@ -1693,8 +1703,11 @@ Gen_DataH2D (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
   WN_Set_Call_Non_Parm_Ref(wn);
   WN_Set_Call_Parm_Ref(wn);
   WN_linenum(wn) = acc_line_number;
-
-  wnx = WN_Ldid(Pointer_type, 0, Src, ST_type(Src));
+  
+  if(TY_kind(ST_type(Src)) == KIND_ARRAY)
+	  wnx = WN_Lda( Pointer_type, 0, Src);
+  else
+  	  wnx = WN_Ldid(Pointer_type, 0, Src, Be_Type_Tbl(Pointer_type));
   //WN* multiArrayT;
   //if(ACC_Get_Array_TotalDim(wnx) > 1)
   //	multiArrayT = ACC_Load_MultiDimArray_StartAddr(wnx);
@@ -1704,7 +1717,7 @@ Gen_DataH2D (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
                        WN_ty(wnx), WN_PARM_BY_VALUE);
 
   
-  wnx = WN_Ldid(Pointer_type, 0, Dst, ST_type(Dst));
+  wnx = WN_Ldid(Pointer_type, 0, Dst, Be_Type_Tbl(Pointer_type));
 
   //wnx = WN_Lda( Pointer_type, 0, Dst);
   WN_kid(wn, 1) = WN_CreateParm(Pointer_type, wnx, 
@@ -2272,6 +2285,7 @@ is inheriting pu_recursive OK?
           pu_idx);
   Set_ST_addr_passed(acc_parallel_proc);
   Set_ST_ACC_kernels_func(acc_parallel_proc);
+  Set_ST_sfname_idx(acc_parallel_proc, Save_Str(Src_File_Name));
 
   Allocate_Object ( acc_parallel_proc );
   
@@ -4279,8 +4293,10 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
    	   }
 	   else
 	   {
-	   		Is_True(FALSE, ("2 level Loop Combination is wrong@acc_lower:ACC_Transform_MultiForLoop."));
+			//Not support yet
+			Is_True(FALSE, ("this loop scheduling for 2-level nested loop @acc_lower:ACC_Transform_MultiForLoop."));
 	   }
+	   
 	   /***********************************************************/
 	   /////////////////////////////////////////////////////////////
 	   //Let's begin analysis the statement in this kernel block
@@ -4419,69 +4435,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimx));
 			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
 										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);
-			/*//Init part
-			//i=blockIdx.y
-			WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(blockidy));
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
-
-			WN* MidInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
-										WN_COPY_Tree(blockidx), WN_COPY_Tree(blockdimx));
-			//j=blockIdx.x * blockDim.x ;
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
-			//j = j + threadIdx.x;
-			MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
-										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(threadidx));
-			
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
-			
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
-			
-			//k=threadidx.y
-			WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidy));
-			
-			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
-			
-		   ST* st_new_tmp = New_ST( CURRENT_SYMTAB );
-		   char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
-		   
-		   sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-		   kernel_tmp_variable_count ++;
-
-			
-		   ST_Init(st_new_tmp, Save_Str( tmp_localname), CLASS_VAR, 
-						SCLASS_AUTO, EXPORT_LOCAL, MTYPE_To_TY(Integer_type));
-			//GridWidthInThreads = blockDim.x * gridDim.x
-		    WN* GridWidthInThreads = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), 
-		    										WN_COPY_Tree(blockdimx), WN_COPY_Tree(griddimx));
-			WN* WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, 
-										ST_type(st_new_tmp), GridWidthInThreads);
-			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);
-			//Finished init part
-			/////////////////////////////////////////////
-			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
-										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(blockdimy));
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
-			//load GridWidthInThreads
-			GridWidthInThreads = WN_Ldid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp));
-			MidIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
-										WN_COPY_Tree(wn_MidIndex), GridWidthInThreads);
-
-			
-			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
-			
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
-										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimy));
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);*/
 
 	   }
 	   else if(OutterType ==  ACC_VECTOR && MidType == ACC_GANG_VECTOR &&InnerType == ACC_GANG_VECTOR)
@@ -4795,7 +4749,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			
 			GridWidthInThreadsOuter = WN_Ldid(TY_mtype(ST_type(st_new_tmpOuter)), 0, 
 											st_new_tmpOuter, ST_type(st_new_tmpOuter));
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_new_tmpOuter)), 
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), GridWidthInThreadsOuter);
 
 			
@@ -4808,6 +4762,156 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			//							st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);			
 
 	   }
+	   else if(OutterType ==  ACC_GANG && MidType == ACC_GANG &&InnerType == ACC_VECTOR)
+	   {			
+	   		//i=blockIdx.z * blockDim.z
+	   		
+			//j=blockIdx.y * blockDim.y ;
+			WN* OuterInitIndexOp;// = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_OutIndex)), 
+								 //	WN_COPY_Tree(blockidz), WN_COPY_Tree(blockdimz));
+			
+			//OuterInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			//							WN_COPY_Tree(OuterInitIndexOp), WN_COPY_Tree(threadidz));
+			
+			//MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
+			OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
+										st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(blockidy));
+			
+			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+
+			//j=blockIdx.y * blockDim.y ;
+			WN* MidInitndexOp;// = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
+								//		WN_COPY_Tree(blockidy), WN_COPY_Tree(blockdimy));
+			//j = j + threadIdx.y;
+			//MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
+			//							WN_COPY_Tree(MidInitndexOp), WN_COPY_Tree(threadidy));
+
+			
+			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), WN_COPY_Tree(blockidx));
+			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+			//j = j + threadIdx.y;
+			//MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
+			//							WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(threadidy));
+			
+			//MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
+			
+			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+
+			
+			//k=blockIdx.x * blockDim.x ;
+			WN* InnerInitIndexOp;// = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_InnerIndex)), 
+								 //		WN_COPY_Tree(blockidx), WN_COPY_Tree(blockdimx));
+			//k = k + threadIdx.x;
+			//InnerInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			//							WN_COPY_Tree(InnerInitIndexOp), WN_COPY_Tree(threadidx));
+					
+			InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
+			
+			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+
+		  	//GridWidthInThreadsMid = blockdimy * griddimy, this will be used to update the mid index.
+		  	
+		    /*ST* st_new_tmpOuter = New_ST( CURRENT_SYMTAB );
+		    char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
+		   
+		    sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
+		    kernel_tmp_variable_count ++;
+
+			
+		    ST_Init(st_new_tmpOuter, Save_Str( tmp_localname), CLASS_VAR, 
+						SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
+			//GridWidthInThreads = blockDim.z * gridDim.z
+		    WN* GridWidthInThreadsOuter = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_z)), 
+		    										WN_COPY_Tree(blockdimz), WN_COPY_Tree(griddimz));
+			WN* WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmpOuter)), 0, st_new_tmpOuter, 
+										ST_type(st_new_tmpOuter), GridWidthInThreadsOuter);
+			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);
+			////////////////////////////////////////////////////////////////////////////////
+		    ST* st_new_tmpMid = New_ST( CURRENT_SYMTAB );
+		    //char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
+		   
+		    sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
+		    kernel_tmp_variable_count ++;
+
+			
+		    ST_Init(st_new_tmpMid, Save_Str( tmp_localname), CLASS_VAR, 
+						SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
+			//GridWidthInThreads = blockDim.y * gridDim.y
+		    WN* GridWidthInThreadsMid = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_y)), 
+		    										WN_COPY_Tree(blockdimy), WN_COPY_Tree(griddimy));
+			WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmpMid)), 0, st_new_tmpMid, 
+										ST_type(st_new_tmpMid), GridWidthInThreadsMid);
+			
+			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);
+			//////////////////////////////////////////////////////////
+		    ST* st_new_tmpInner = New_ST( CURRENT_SYMTAB );
+		    //char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
+		   
+		    sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
+		    kernel_tmp_variable_count ++;
+
+			
+		    ST_Init(st_new_tmpInner, Save_Str( tmp_localname), CLASS_VAR, 
+						SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
+			//GridWidthInThreads = blockDim.x * gridDim.x
+		    WN* GridWidthInThreadsInner = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), 
+		    										WN_COPY_Tree(blockdimx), WN_COPY_Tree(griddimx));
+			WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmpInner)), 0, st_new_tmpInner, 
+										ST_type(st_new_tmpInner), GridWidthInThreadsInner);
+			
+			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);*/
+		    
+			//Finished init part
+			/////////////////////////////////////////////
+			//Inner index update
+			//GridWidthInThreadsInner = WN_Ldid(TY_mtype(ST_type(st_new_tmpInner)), 0, 
+			//								st_new_tmpInner, ST_type(st_new_tmpInner));
+			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(blockdimx));
+
+			
+			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
+			
+			//InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			//							WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(griddimx));
+			//InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			//							st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
+			//Mid index update
+			//GridWidthInThreadsMid = WN_Ldid(TY_mtype(ST_type(st_new_tmpMid)), 0, st_new_tmpMid, ST_type(st_new_tmpMid));
+			MidIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
+										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(griddimx));
+
+			
+			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
+			//Outer index update
+			
+			//GridWidthInThreadsOuter = WN_Ldid(TY_mtype(ST_type(st_new_tmpOuter)), 0, 
+			//								st_new_tmpOuter, ST_type(st_new_tmpOuter));
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimy));
+
+			
+			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
+										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);
+			
+			//OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			//							WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(blockdimx));
+			//OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
+			//							st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);			
+
+	   }
+	   else
+	   {
+			//Not support yet
+			Is_True(FALSE, ("this loop scheduling for 3-level nested loop @acc_lower:ACC_Transform_MultiForLoop."));
+	   }
+	
 	   
 	   
 	   /***********************************************************/
@@ -4860,7 +4964,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	else
 	{
 		//Not support yet
-		Is_True(FALSE, ("3 Level Loop Combination is wrong@acc_lower:ACC_Transform_MultiForLoop."));
+		Is_True(FALSE, ("more than 3 Level Loop Combination is not supported.@acc_lower:ACC_Transform_MultiForLoop."));
 	}
 	
    	WN_INSERT_BlockLast ( acc_parallel_func, IndexGenerationBlock );
@@ -5485,11 +5589,11 @@ static void ACC_Setup_GPU_toplogy_kernels(WN* replace_block)
 				WN_INSERT_BlockLast(replace_block, wn_vectors_set);
 			}
 		}
-		else
+		/*else
 		{
 			//crash&report error message
 			Is_True(FALSE, ("2 Level of Loop Combination is wrong@acc_lower:ACC_Transform_MultiForLoop."));
-		}
+		}*/
 		
 	}
 	else if(acc_loopinfo.loopnum == 3)
@@ -5687,11 +5791,39 @@ static void ACC_Setup_GPU_toplogy_kernels(WN* replace_block)
 				WN_INSERT_BlockLast(replace_block, wn_vectors_set);
 			}
 		}
-		else
+		else if(OuterLoopInfo.looptype == ACC_GANG && MidLoopInfo.looptype == ACC_GANG
+					&& InnerLoopInfo.looptype == ACC_VECTOR)
+		{
+			//set gangs
+			if((WN_opcode(wnOuterGangsNumExpr) == OPC_I4INTCONST
+							&& WN_const_val(wnOuterGangsNumExpr) != 0) 
+							|| (WN_opcode(wnOuterGangsNumExpr) != OPC_I4INTCONST))
+			{
+				WN* wn_gangs_set = Gen_Set_Gangs_Num_Z(wnOuterGangsNumExpr);
+				WN_INSERT_BlockLast(replace_block, wn_gangs_set);
+			}
+			
+			if((WN_opcode(wnMidGangsNumExpr) == OPC_I4INTCONST
+							&& WN_const_val(wnMidGangsNumExpr) != 0) 
+							|| (WN_opcode(wnMidGangsNumExpr) != OPC_I4INTCONST))
+			{
+				WN* wn_gangs_set = Gen_Set_Gangs_Num_Y(wnMidGangsNumExpr);
+				WN_INSERT_BlockLast(replace_block, wn_gangs_set);
+			}			
+			
+			if((WN_opcode(wnInnerVectorsNumExpr) == OPC_I4INTCONST 
+							&& WN_const_val(wnInnerVectorsNumExpr) != 0) 
+							|| (WN_opcode(wnInnerVectorsNumExpr) != OPC_I4INTCONST))
+			{
+				WN* wn_vectors_set = Gen_Set_Vector_Num_X(wnInnerGangsNumExpr);
+				WN_INSERT_BlockLast(replace_block, wn_vectors_set);
+			}
+		}
+		/*else
 		{
 			//crash&report error message
-			Is_True(FALSE, ("3 Level of Loop Combination is wrong@acc_lower:ACC_Transform_MultiForLoop."));
-		}
+			Is_True(FALSE, ("3 Level of Loop Combination is wrong@acc_lower:ACC_Setup_GPU_toplogy_kernelsv."));
+		}*/
 	}
 }
 
@@ -5790,6 +5922,7 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 			//This should be the first ACC LOOP
 			acc_loopinfo.loopnum = 0;
 			acc_loopinfo.acc_forloop.clear();
+			kernel_tmp_variable_count = 0;
 			ACC_Extract_ACC_LoopNest_Info(cur_node);
 			acc_parallel_loop_info.acc_loopinfo.push_back(acc_loopinfo);
 			acc_parallel_loop_info.loopnum ++;
@@ -5834,6 +5967,10 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	
 	WN_INSERT_BlockLast(acc_parallel_func, wn_parallelBlock);
 	
+	//launch kernels
+	LaunchKernel(0, wn_replace_block);
+
+	BZERO ( acc_local_var_table, ssize );
 		
 	
 	BZERO ( acc_local_var_table, ssize );
@@ -7080,7 +7217,11 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
 		for(ii=0; ii<idim-1; ii++)
 		{
 			WN* wn_index = WN_array_index(tree, ii);
-			TY_IDX idx_ty = TY_mtype(ST_type(WN_st(wn_index)));
+			//TY_IDX idx_ty = WN_rtype(wn_index);
+			//if(WN_has_sym(wn_index))
+			//	idx_ty = TY_mtype(ST_type(WN_st(wn_index)));
+			//else
+			//	Is_True(WN_has_sym(wn_index), ("WN_st: wn doesn't have ST field"));
 			wn_index = WN_COPY_Tree(wn_index);
 			int iii = ii;
 			while(iii<idim-1)
@@ -7686,7 +7827,39 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l,
 		pSTMap->wnSize = wnSize;
 		pSTMap->wnStart = wnStart;
 		pDMap->push_back(pSTMap);
-
+		/*{
+			WN * wn;
+			WN* wnx;
+			char strname[256];
+			wn = WN_Create(OPC_VCALL, 4);	
+			WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_PRINTF_DBG);
+		  
+			WN_Set_Call_Non_Data_Mod(wn);
+			WN_Set_Call_Non_Data_Ref(wn);
+			WN_Set_Call_Non_Parm_Mod(wn);
+			WN_Set_Call_Non_Parm_Ref(wn);
+			WN_Set_Call_Parm_Ref(wn);
+			sprintf(strname, "%s host address: 0x%%x, %s address: 0x", ST_name(old_st), ST_name(karg));
+			strcat(strname, "%x; Size: 0x%x\n");
+		    //char* info_out = "verify address: %x";
+			WN* wn_info_out = WN_LdaString(strname,0, strlen(strname)+1);
+			
+		    WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wn_info_out, 
+		                       WN_ty(wn_info_out), WN_PARM_BY_VALUE);
+			if(TY_kind(ty) == KIND_ARRAY)
+				wnx = WN_Lda( Pointer_type, 0, old_st);
+			else
+				wnx = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));	
+		    WN_kid(wn, 1) = WN_CreateParm(Pointer_type, wnx, 
+		                       WN_ty(wnx), WN_PARM_BY_VALUE);	
+			
+			wnx = WN_Lda( Pointer_type, 0, karg);
+		    WN_kid(wn, 2) = WN_CreateParm(Pointer_type, wnx, 
+		                       WN_ty(wnx), WN_PARM_BY_REFERENCE);
+			WN_kid(wn, 3) = WN_CreateParm(MTYPE_U4, WN_COPY_Tree(wnSize), 
+		  				Be_Type_Tbl(MTYPE_U4), WN_PARM_BY_VALUE);
+			WN_INSERT_BlockLast(ReplacementBlock, wn);
+		}*/
 		WN* WN_mallocall = Gen_DeviceMalloc(old_st, karg, WN_COPY_Tree(wnSize));
 		WN_INSERT_BlockLast(ReplacementBlock, WN_mallocall);
 		return karg;
@@ -7706,8 +7879,11 @@ static WN* ACC_GenIsPCreate(WN* node)
 	WN* wnSizeInUnit = ACC_GetArraySizeInUnit(node);
 	WN* wnStart = ACC_GetArrayStart(node);
 	ST *old_st = WN_st(node);
-	
-  	WN* wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
+	WN* wnAddr;
+	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
+		wnAddr = WN_Lda( Pointer_type, 0, old_st);
+  	else
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
 	
 	WN * wn;
 	wn = WN_Create(OPC_I4CALL, 4 );
@@ -7738,7 +7914,11 @@ static WN* ACC_GenIsPCopy(WN* node)
 	WN* wnStart = ACC_GetArrayStart(node);
 	ST *old_st = WN_st(node);
 	
-  	WN* wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
+	WN* wnAddr;
+	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
+		wnAddr = WN_Lda( Pointer_type, 0, old_st);
+  	else
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
 	
 	WN * wn;
 	wn = WN_Create(OPC_VCALL, 3 );
@@ -7767,7 +7947,11 @@ static WN* ACC_GenIsPCopyIn(WN* node)
 	WN* wnStart = ACC_GetArrayStart(node);
 	ST *old_st = WN_st(node);
 	
-  	WN* wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
+	WN* wnAddr;
+	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
+		wnAddr = WN_Lda( Pointer_type, 0, old_st);
+  	else
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
 	
 	WN * wn;
 	wn = WN_Create(OPC_VCALL, 3 );
@@ -7796,7 +7980,12 @@ static WN* ACC_GenIsPCopyOut(WN* node)
 	WN* wnStart = ACC_GetArrayStart(node);
 	ST *old_st = WN_st(node);
 	
-  	WN* wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
+  	
+	WN* wnAddr;
+	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
+		wnAddr = WN_Lda( Pointer_type, 0, old_st);
+  	else
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
 	
 	WN * wn;
 	wn = WN_Create(OPC_VCALL, 3 );
@@ -7874,7 +8063,11 @@ static WN* ACC_Gen_GetDeviceAddr(WN* node, ST* st_device)
 	WN* wnStart = ACC_GetArrayStart(node);
 	ST *old_st = WN_st(node);
 	
-  	WN* wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
+	WN* wnAddr;
+	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
+		wnAddr = WN_Lda( Pointer_type, 0, old_st);
+  	else
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
 	
 	WN * wn;
 	WN * wnx;
@@ -8063,7 +8256,10 @@ static WN* ACC_GenUpdateHostVar(ST* st_Var, WN* wn_start, WN* wn_length)
   WN_Set_Call_Parm_Ref(wn);
   WN_linenum(wn) = acc_line_number;
 
-  wnx = WN_Ldid(Pointer_type, 0, st_Var, ST_type(st_Var));
+  if(TY_kind(ST_type(st_Var)) == KIND_ARRAY)
+	wnx = WN_Lda( Pointer_type, 0, st_Var);
+  else
+	wnx = WN_Ldid(Pointer_type, 0, st_Var, Be_Type_Tbl(Pointer_type));
 
   //wnx = WN_Lda( Pointer_type, 0, Src);
   WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
@@ -8102,7 +8298,10 @@ static WN* ACC_GenUpdateDeviceVar(ST* st_Var, WN* wn_start, WN* wn_length)
   WN_Set_Call_Parm_Ref(wn);
   WN_linenum(wn) = acc_line_number;
 
-  wnx = WN_Ldid(Pointer_type, 0, st_Var, ST_type(st_Var));
+  if(TY_kind(ST_type(st_Var)) == KIND_ARRAY)
+	wnx = WN_Lda( Pointer_type, 0, st_Var);
+  else
+	wnx = WN_Ldid(Pointer_type, 0, st_Var, Be_Type_Tbl(Pointer_type));
 
   //wnx = WN_Lda( Pointer_type, 0, Src);
   WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 

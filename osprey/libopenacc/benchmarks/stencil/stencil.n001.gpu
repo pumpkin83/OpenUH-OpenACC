@@ -1,0 +1,68 @@
+#include "cuda_runtime.h"
+#include "pgi_cuda_runtime.h"
+extern "C" __global__ __launch_bounds__(512) void
+cpu_stencil_65_gpu(
+    int tc1,
+    int tc2,
+    int tc3,
+    signed char* p5/* A0 */,
+    signed char* p6/* Anext */,
+    float x1/* c1 */,
+    int x3/* nx */,
+    int x4/* ny */,
+    float x5/* c0 */)
+{
+long long _k8_1, _k8_2, _k8_3, _k8_4, _k8_5, _k8_6, _k8_7, _k8_8;
+int i25s;
+int i26i;
+int i27s;
+int i28i;
+int i29s;
+int i30i;
+i25s = 0;
+i26i = ((int)((int)threadIdx.x))+(i25s);
+if((i25s)>=(tc3)) goto _BB_6;
+_BB_8: ;
+i26i = ((int)((int)threadIdx.x))+(i25s);
+i27s = 0;
+i28i = ((((int)blockDim.z)*((int)blockIdx.y))+((int)((int)threadIdx.z)))+(i27s);
+if((i27s)>=(tc2)) goto _BB_9;
+_BB_12: ;
+i28i = ((((int)blockDim.z)*((int)blockIdx.y))+((int)((int)threadIdx.z)))+(i27s);
+i29s = 0;
+i30i = ((((int)blockDim.y)*((int)blockIdx.x))+((int)((int)threadIdx.y)))+(i29s);
+if((i29s)>=(tc1)) goto _BB_13;
+_BB_16: ;
+i30i = ((((int)blockDim.y)*((int)blockIdx.x))+((int)((int)threadIdx.y)))+(i29s);
+i30i = ((((int)blockDim.y)*((int)blockIdx.x))+((int)((int)threadIdx.y)))+(i29s);
+if((i29s)>=(tc1)) goto _BB_17;
+i30i = ((((int)blockDim.y)*((int)blockIdx.x))+((int)((int)threadIdx.y)))+(i29s);
+i28i = ((((int)blockDim.z)*((int)blockIdx.y))+((int)((int)threadIdx.z)))+(i27s);
+if((i27s)>=(tc2)) goto _BB_17;
+i28i = ((((int)blockDim.z)*((int)blockIdx.y))+((int)((int)threadIdx.z)))+(i27s);
+if((i26i)>=(tc3)) goto _BB_17;
+if((i30i)>=(tc1)) goto _BB_17;
+if((i28i)>=(tc2)) goto _BB_17;
+_k8_1 = ((long long)((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i)))))+(i26i))*(4LL);
+_k8_2 = ((long long)((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i)))))+((i26i)+(2)))*(4LL);
+_k8_3 = ((long long)((1)+(i26i))+((x3/* nx */)*(((x4/* ny */)*((1)+(i30i)))+(i28i))))*(4LL);
+_k8_4 = ((long long)((1)+(i26i))+((x3/* nx */)*(((x4/* ny */)*((1)+(i30i)))+((i28i)+(2)))))*(4LL);
+_k8_5 = ((long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*(i30i)))))*(4LL);
+_k8_6 = ((long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((i30i)+(2))))))*(4LL);
+_k8_7 = ((long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i))))))*(4LL);
+_k8_8 = ((long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i))))))*(4LL);
+(( float*)p6/* Anext */)[(long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i)))))] = (__fmul_rn(x1/* c1 */, (( float*)p5/* A0 */)[(long long)((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i)))))+(i26i)]+((( float*)p5/* A0 */)[(long long)((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i)))))+((i26i)+(2))]+((( float*)p5/* A0 */)[(long long)((1)+(i26i))+((x3/* nx */)*(((x4/* ny */)*((1)+(i30i)))+(i28i)))]+((( float*)p5/* A0 */)[(long long)((1)+(i26i))+((x3/* nx */)*(((x4/* ny */)*((1)+(i30i)))+((i28i)+(2))))]+((( float*)p5/* A0 */)[(long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*(i30i))))]+(( float*)p5/* A0 */)[(long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((i30i)+(2)))))]))))))-(__fmul_rn(x5/* c0 */, (( float*)p5/* A0 */)[(long long)((1)+(i26i))+((x3/* nx */)*(((1)+(i28i))+((x4/* ny */)*((1)+(i30i)))))]));
+_BB_17: ;
+i29s = (((int)gridDim.x)*((int)blockDim.y))+(i29s);
+i30i = ((((int)blockDim.y)*((int)blockIdx.x))+((int)((int)threadIdx.y)))+(i29s);
+if((i29s)<(tc1)) goto _BB_16;
+_BB_13: ;
+i27s = (((int)gridDim.y)*((int)blockDim.z))+(i27s);
+i28i = ((((int)blockDim.z)*((int)blockIdx.y))+((int)((int)threadIdx.z)))+(i27s);
+if((i27s)<(tc2)) goto _BB_12;
+_BB_9: ;
+i25s = ((int)((int)blockDim.x))+(i25s);
+i26i = ((int)((int)threadIdx.x))+(i25s);
+if((i25s)<(tc3)) goto _BB_8;
+_BB_6: ;
+}

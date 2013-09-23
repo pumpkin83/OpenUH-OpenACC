@@ -304,6 +304,7 @@ public:
     BOOL operator==(ST &st) const;
 
     friend std::ostream& operator<<(std::ostream &os, const ST& st);
+	STR_IDX src_fname_idx;
 
 }; // ST
 
@@ -659,6 +660,7 @@ public:
     } u1;				// idx to FLD_TAB, TYLIST_TAB, etc.
 
     STR_IDX name_idx;			// name 
+    STR_IDX src_fname_idx;		// where is this ty from 
 
     union {
 	TY_IDX etype;			// type of array element (array only)

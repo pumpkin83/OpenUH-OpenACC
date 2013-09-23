@@ -1,0 +1,148 @@
+	.version 1.4
+	.target sm_10, map_f64_to_f32
+	// compiled with /opt/cuda/5.0/open64/lib//be
+	// nvopencc 4.1 built on 2012-09-21
+
+	//-----------------------------------------------------------
+	// Compiling /tmp/tmpxft_000044fb_00000000-9_heat.w2c.cpp3.i (/tmp/ccBI#.w5cVSp)
+	//-----------------------------------------------------------
+
+	//-----------------------------------------------------------
+	// Options:
+	//-----------------------------------------------------------
+	//  Target:ptx, ISA:sm_10, Endian:little, Pointer Size:64
+	//  -O3	(Optimization level)
+	//  -g0	(Debug level)
+	//  -m2	(Report advisories)
+	//-----------------------------------------------------------
+
+	.file	1	"/tmp/tmpxft_000044fb_00000000-8_heat.w2c.cudafe2.gpu"
+	.file	2	"/usr/lib/gcc/x86_64-redhat-linux/4.1.2/include/stddef.h"
+	.file	3	"/opt/cuda/5.0/bin/../include/crt/device_runtime.h"
+	.file	4	"/opt/cuda/5.0/bin/../include/host_defines.h"
+	.file	5	"/opt/cuda/5.0/bin/../include/builtin_types.h"
+	.file	6	"/opt/cuda/5.0/bin/../include/device_types.h"
+	.file	7	"/opt/cuda/5.0/bin/../include/driver_types.h"
+	.file	8	"/opt/cuda/5.0/bin/../include/surface_types.h"
+	.file	9	"/opt/cuda/5.0/bin/../include/texture_types.h"
+	.file	10	"/opt/cuda/5.0/bin/../include/vector_types.h"
+	.file	11	"/opt/cuda/5.0/bin/../include/device_launch_parameters.h"
+	.file	12	"/opt/cuda/5.0/bin/../include/crt/storage_class.h"
+	.file	13	"heat.w2c.cu"
+	.file	14	"/opt/cuda/5.0/bin/../include/common_functions.h"
+	.file	15	"/opt/cuda/5.0/bin/../include/math_functions.h"
+	.file	16	"/opt/cuda/5.0/bin/../include/math_constants.h"
+	.file	17	"/opt/cuda/5.0/bin/../include/device_functions.h"
+	.file	18	"/opt/cuda/5.0/bin/../include/sm_11_atomic_functions.h"
+	.file	19	"/opt/cuda/5.0/bin/../include/sm_12_atomic_functions.h"
+	.file	20	"/opt/cuda/5.0/bin/../include/sm_13_double_functions.h"
+	.file	21	"/opt/cuda/5.0/bin/../include/sm_20_atomic_functions.h"
+	.file	22	"/opt/cuda/5.0/bin/../include/sm_35_atomic_functions.h"
+	.file	23	"/opt/cuda/5.0/bin/../include/sm_20_intrinsics.h"
+	.file	24	"/opt/cuda/5.0/bin/../include/sm_30_intrinsics.h"
+	.file	25	"/opt/cuda/5.0/bin/../include/sm_35_intrinsics.h"
+	.file	26	"/opt/cuda/5.0/bin/../include/surface_functions.h"
+	.file	27	"/opt/cuda/5.0/bin/../include/texture_fetch_functions.h"
+	.file	28	"/opt/cuda/5.0/bin/../include/texture_indirect_functions.h"
+	.file	29	"/opt/cuda/5.0/bin/../include/surface_indirect_functions.h"
+	.file	30	"/opt/cuda/5.0/bin/../include/math_functions_dbl_ptx1.h"
+
+
+	.entry __accrg_step_kernel_cpu_1_1 (
+		.param .u64 __cudaparm___accrg_step_kernel_cpu_1_1_temp_in,
+		.param .u64 __cudaparm___accrg_step_kernel_cpu_1_1_temp_out,
+		.param .s32 __cudaparm___accrg_step_kernel_cpu_1_1_ni,
+		.param .s32 __cudaparm___accrg_step_kernel_cpu_1_1_nj,
+		.param .f64 __cudaparm___accrg_step_kernel_cpu_1_1_tfac)
+	{
+	.reg .u16 %rh<5>;
+	.reg .u32 %r<18>;
+	.reg .u64 %rd<14>;
+	.reg .f64 %fd<16>;
+	.reg .pred %p<6>;
+	.loc	13	19	0
+$LDWbegin___accrg_step_kernel_cpu_1_1:
+	.loc	13	34	0
+	cvt.s32.u16 	%r1, %ctaid.y;
+	mov.s32 	%r2, %r1;
+	ld.param.s32 	%r3, [__cudaparm___accrg_step_kernel_cpu_1_1_nj];
+	setp.le.s32 	%p1, %r3, %r1;
+	@%p1 bra 	$Lt_0_2306;
+	mov.u16 	%rh1, %ntid.x;
+	mov.u16 	%rh2, %nctaid.x;
+	mul.wide.u16 	%r4, %rh2, %rh1;
+	mov.u16 	%rh3, %ctaid.x;
+	mul.wide.u16 	%r5, %rh3, %rh1;
+	cvt.u32.u16 	%r6, %tid.x;
+	add.u32 	%r7, %r6, %r5;
+	ld.param.s32 	%r8, [__cudaparm___accrg_step_kernel_cpu_1_1_ni];
+	setp.gt.s32 	%p2, %r8, %r7;
+	cvt.u32.u16 	%r9, %nctaid.y;
+$Lt_0_2818:
+ //<loop> Loop body line 34, nesting depth: 1, estimated iterations: unknown
+	@!%p2 bra 	$Lt_0_3074;
+	ld.param.s32 	%r8, [__cudaparm___accrg_step_kernel_cpu_1_1_ni];
+	mul.lo.s32 	%r10, %r2, %r8;
+	neg.s32 	%r11, %r8;
+	add.s32 	%r12, %r10, %r7;
+	add.s32 	%r13, %r10, %r8;
+	add.s32 	%r14, %r10, %r11;
+	add.s32 	%r15, %r13, %r7;
+	add.s32 	%r16, %r14, %r7;
+	ld.param.u64 	%rd1, [__cudaparm___accrg_step_kernel_cpu_1_1_temp_out];
+	ld.param.f64 	%fd1, [__cudaparm___accrg_step_kernel_cpu_1_1_tfac];
+	ld.param.u64 	%rd2, [__cudaparm___accrg_step_kernel_cpu_1_1_temp_in];
+$Lt_0_3586:
+ //<loop> Loop body line 34, nesting depth: 2, estimated iterations: unknown
+	.loc	13	48	0
+	cvt.u64.u32 	%rd3, %r12;
+	mul.wide.u32 	%rd4, %r12, 8;
+	.loc	13	34	0
+	ld.param.u64 	%rd2, [__cudaparm___accrg_step_kernel_cpu_1_1_temp_in];
+	.loc	13	48	0
+	add.u64 	%rd5, %rd4, %rd2;
+	ld.global.f64 	%fd2, [%rd5+0];
+	cvt.u64.u32 	%rd6, %r15;
+	mul.wide.u32 	%rd7, %r15, 8;
+	add.u64 	%rd8, %rd2, %rd7;
+	ld.global.f64 	%fd3, [%rd8+0];
+	cvt.u64.u32 	%rd9, %r16;
+	mul.wide.u32 	%rd10, %r16, 8;
+	add.u64 	%rd11, %rd2, %rd10;
+	ld.global.f64 	%fd4, [%rd11+0];
+	mov.f64 	%fd5, 0dc000000000000000;	// -2
+	mad.rn.f64 	%fd6, %fd2, %fd5, %fd4;
+	add.f64 	%fd7, %fd3, %fd6;
+	ld.global.f64 	%fd8, [%rd5+8];
+	ld.global.f64 	%fd9, [%rd5+-8];
+	mov.f64 	%fd10, 0dc000000000000000;	// -2
+	mad.rn.f64 	%fd11, %fd2, %fd10, %fd9;
+	add.f64 	%fd12, %fd8, %fd11;
+	add.f64 	%fd13, %fd7, %fd12;
+	.loc	13	34	0
+	ld.param.f64 	%fd1, [__cudaparm___accrg_step_kernel_cpu_1_1_tfac];
+	.loc	13	48	0
+	mad.rn.f64 	%fd14, %fd1, %fd13, %fd2;
+	.loc	13	34	0
+	ld.param.u64 	%rd1, [__cudaparm___accrg_step_kernel_cpu_1_1_temp_out];
+	.loc	13	48	0
+	add.u64 	%rd12, %rd4, %rd1;
+	st.global.f64 	[%rd12+0], %fd14;
+	add.s32 	%r16, %r16, %r4;
+	add.s32 	%r15, %r15, %r4;
+	add.s32 	%r12, %r12, %r4;
+	setp.lt.s32 	%p3, %r12, %r13;
+	@%p3 bra 	$Lt_0_3586;
+$Lt_0_3074:
+	add.u32 	%r2, %r2, %r9;
+	.loc	13	34	0
+	ld.param.s32 	%r3, [__cudaparm___accrg_step_kernel_cpu_1_1_nj];
+	.loc	13	48	0
+	setp.lt.s32 	%p4, %r2, %r3;
+	@%p4 bra 	$Lt_0_2818;
+$Lt_0_2306:
+	.loc	13	53	0
+	exit;
+$LDWend___accrg_step_kernel_cpu_1_1:
+	} // __accrg_step_kernel_cpu_1_1
+

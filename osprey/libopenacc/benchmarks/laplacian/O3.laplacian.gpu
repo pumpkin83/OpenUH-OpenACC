@@ -1,0 +1,78 @@
+#include "cuda_runtime.h"
+#include "pgi_cuda_runtime.h"
+extern "C" __global__ __launch_bounds__(256) void
+laplacian_51_gpu(
+    int tc1,
+    int tc2,
+    int tc3,
+    signed char* p5/* w0 */,
+    signed char* p6/* w1 */,
+    int x2/* ny */,
+    int x3/* nx */,
+    double x4/* beta */,
+    double x5/* alpha */)
+{
+int _i_1, _i_2;
+long long _k8_1, _k8_2, _k8_3, _k8_4, _k8_5, _k8_6, _k8_7;
+int i25s;
+int i27s;
+int i28i;
+unsigned int e32;
+int e33;
+unsigned int e37;
+unsigned int e38;
+unsigned int e40;
+unsigned int e41;
+unsigned int e44;
+unsigned int e45;
+unsigned int e48;
+unsigned int e49;
+int j179;
+int j120;
+e32 = (((int)blockDim.y)*((int)blockIdx.x))+((int)threadIdx.y);
+i25s = 0;
+if( ((0)>=(tc3)))  goto _BB_6;
+e33 = (x2/* ny */)*(x3/* nx */);
+_BB_11: ;
+_i_1 = ((int)((int)blockIdx.y))+(i25s);
+e44 = ((int)((int)threadIdx.x))+((e33)*((_i_1)+(1)));
+e40 = ((int)((int)threadIdx.x))+((e33)*((_i_1)+(2)));
+e37 = ((int)((int)threadIdx.x))+((e33)*(_i_1));
+i27s = 0;
+if( ((0)>=(tc2)))  goto _BB_9;
+_BB_12: ;
+_i_1 = ((int)(e32))+(i27s);
+e48 = ((int)(e44))+((x3/* nx */)*((_i_1)+(2)));
+e45 = ((int)(e44))+((x3/* nx */)*(_i_1));
+_i_2 = (x3/* nx */)*((_i_1)+(1));
+e49 = ((int)(e44))+(_i_2);
+e41 = ((int)(e40))+(_i_2);
+e38 = ((int)(e37))+(_i_2);
+i28i = ((((int)blockDim.y)*((int)blockIdx.x))+((int)((int)threadIdx.y)))+(i27s);
+if( ((0)>=(tc1)))  goto _BB_13;
+j120 = ((tc1)-((int)((int)blockDim.x)))+((int)((int)blockDim.x));
+j179 = 0;
+_BB_16: ;
+if( ((i27s)>=(tc2)))  goto _BB_17;
+if(((i25s)>=((tc3)-((int)((int)blockIdx.y))))||(((((int)((int)threadIdx.x))-(tc1))+(j179))>=0)||((i28i)>=(tc2))) goto _BB_17;
+_k8_1 = ((long long)(((int)(e38))+(j179))+(1))*(8LL);
+_k8_2 = ((long long)(((int)(e41))+(j179))+(1))*(8LL);
+_k8_3 = ((long long)(((int)(e45))+(j179))+(1))*(8LL);
+_k8_4 = ((long long)(((int)(e48))+(j179))+(1))*(8LL);
+_k8_5 = ((long long)(((int)(e44))+((x3/* nx */)*((((int)(e32))+(i27s))+(1))))+(j179))*(8LL);
+_i_1 = ((int)(e49))+(j179);
+_k8_6 = ((long long)(_i_1)+(2))*(8LL);
+_k8_7 = ((long long)(_i_1)+(1))*(8LL);
+(( double*)p6/* w1 */)[(long long)(_i_1)+(1)] = (__dmul_rn((( double*)p5/* w0 */)[(long long)(((int)(e38))+(j179))+(1)]+((( double*)p5/* w0 */)[(long long)(((int)(e41))+(j179))+(1)]+((( double*)p5/* w0 */)[(long long)(((int)(e45))+(j179))+(1)]+((( double*)p5/* w0 */)[(long long)(((int)(e48))+(j179))+(1)]+((( double*)p5/* w0 */)[(long long)(((int)(e44))+((x3/* nx */)*((((int)(e32))+(i27s))+(1))))+(j179)]+(( double*)p5/* w0 */)[(long long)(_i_1)+(2)])))), x4/* beta */))+(__dmul_rn((( double*)p5/* w0 */)[(long long)(_i_1)+(1)], x5/* alpha */));
+_BB_17: ;
+j120 = (j120)+(-((int)((int)blockDim.x)));
+j179 = (j179)+((int)((int)blockDim.x));
+if( ((j120)>0)) goto _BB_16;
+_BB_13: ;
+i27s = (((int)gridDim.x)*((int)blockDim.y))+(i27s);
+if( ((tc2)>(i27s)))  goto _BB_12;
+_BB_9: ;
+i25s = ((int)((int)gridDim.y))+(i25s);
+if( ((tc3)>(i25s)))  goto _BB_11;
+_BB_6: ;
+}

@@ -122,6 +122,7 @@
 #define anyfe	f
 #define ipl	i
 #define be	b
+#define wgen w
 #define	as	a
 #define ld	l
 #define ipap	j
@@ -956,6 +957,12 @@ I-xall		;	FTN	ffe	self
         "enable the multiprocessing directives (same as -mp)"
 -fopenmp			;		FTN,Cc	ffe	-mp
         "enable the multiprocessing directives (same as -mp)"
+-acc     toggle(&acckind,NORMAL_ACC100);      FTN,Cc  ffe,cfe,wgen,be     self
+        "enable the accelerator directives"
+-fopenacc           ;      FTN,Cc ffe -acc
+        "enable the accelerator directives (same as -acc)"
+-s2s    toggle(&acckind,NORMAL_ACC100);      ALL wgen,be   "-s2s"
+        "enable OpenACC source-to-source translation strategy."
 -memsim			;		ALL	N	"-LNO:mem_sim=TRUE -lmemsim"
 	""
 

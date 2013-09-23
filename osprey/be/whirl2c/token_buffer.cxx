@@ -1209,7 +1209,7 @@ write_token(FILE        *ofile,   /* NULL if strbuf!=NULL */
          str = TOKEN_BUFFER_get_char_string(buffer, a_token);
          tokenlen = TOKEN_string_size(a_token);
 
-         if(PU_src_lang(Get_Current_PU()) == PU_F77_LANG || PU_src_lang(Get_Current_PU()) == PU_F90_LANG) //Source is FORTRAN
+         if(Current_pu && (PU_src_lang(Get_Current_PU()) == PU_F77_LANG || PU_src_lang(Get_Current_PU()) == PU_F90_LANG)) //Source is FORTRAN
          { 
             for(ch_idx = 0; ch_idx < tokenlen; ch_idx++)             //shilpa - this eliminates leading underscores from fortran tokens
             {    if(str[ch_idx] != '_')
