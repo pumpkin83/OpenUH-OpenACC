@@ -16297,6 +16297,8 @@ const char * LOWER_ACTIONS_name(LOWER_ACTIONS actions)
   case LOWER_BIT_FIELD_ID:		return "LOWER_BIT_FIELD_ID";
   case LOWER_BITS_OP:			return "LOWER_BITS_OP";
   case LOWER_TO_MEMLIB:                 return "LOWER_TO_MEMLIB";
+  case LOWER_FAST_EXP:                 	return "LOWER_FAST_EXP";
+  case LOWER_ACC:                 		return "LOWER_ACC";
   default:				return "<unrecognized>";
   }
 }
