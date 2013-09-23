@@ -1439,16 +1439,7 @@ W2C_Outfile_Init_OpenACC(BOOL emit_global_decls)
       return; /* Already initialized */
 
    W2C_Outfile_Initialized = TRUE;
-   if (W2C_Verbose)
-   {
-      if (W2C_Prompf_Emission || W2C_File_Name[W2C_LOC_FILE] == NULL)
-	 fprintf(stderr, 
-		 "%s translates %s into %s, based on source %s\n", 
-		 W2C_Progname,
-		 Irb_File_Name, 
-		 W2C_File_Name[W2C_GPU_FILE], 
-		 W2C_File_Name[W2C_ORIG_FILE]);
-   } /* if verbose */
+   
 
    /* Initialize the whirl2c modules!
     */
