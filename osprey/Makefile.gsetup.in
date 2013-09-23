@@ -220,6 +220,10 @@ ifndef CAFRT_ENABLE_PROFILES
 	CAFRT_ENABLE_PROFILES = @CAFRT_ENABLE_PROFILES@
 endif
 
+ifndef CUDA_HOME
+    CUDA_HOME=@CUDA_HOME@
+endif
+
 #### END OPENUH CONFIG ####
 ######################################################
 

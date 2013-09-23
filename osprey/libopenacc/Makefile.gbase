@@ -42,14 +42,14 @@ TARGETS = $(LIBRARY) $(DSO)
 endif
 
 CFLAGS = -fPIC -Wall -g DACC_WARN_LOG -DACC_DEBUG_LOG -DACC_INFO_LOG
-ACCINCL = /opt/cuda/5.0/include
+ACCINCL = $(CUDA_HOME)/include
 
 
 ACCDYNAMIC_LIBS = -lcuda -lcudart -lpthread
 ifeq ($(BUILD_ARCH), IA32)
-ACCLIBS = -L/opt/cuda/5.0/lib $(ACCDYNAMIC_LIBS)
+ACCLIBS = -L$(CUDA_HOME)/lib $(ACCDYNAMIC_LIBS)
 else
-ACCLIBS = -L/opt/cuda/5.0/lib64 $(ACCDYNAMIC_LIBS)
+ACCLIBS = -L$(CUDA_HOME)/lib64 $(ACCDYNAMIC_LIBS)
 endif
 
 ACCLDFLAGS = -g -shared

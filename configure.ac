@@ -140,6 +140,13 @@ AS_HELP_STRING([--with-default-caf-heap-size=<heap size>],
 DEFAULT_CAF_HEAP_SIZE="$with_default_caf_heap_size",
 DEFAULT_CAF_HEAP_SIZE="30M")
 
+# cuda
+AC_ARG_WITH(cuda,
+AS_HELP_STRING([--with-cuda=<cuda path>],
+[CUDA path for building libopenacc]),
+CUDA_HOME="$with_cuda",
+CUDA_HOME="/opt/cuda/5.0")
+
 # set bash path
 BASH_PATH=`which bash`
 
@@ -213,6 +220,12 @@ if test -n "${GASNET_HOME}"; then
                     | sed 's/-conduit//g')`
   if test  "${GASNET_CONDUITS}" = "*"; then
       AC_MSG_ERROR([Specified --with-gasnet-root=<path> doesn't look right. Check path.])
+  fi
+fi
+
+if test -n "${CUDA_HOME}"; then
+  if test ! -d "${CUDA_HOME}"; then
+      AC_MSG_ERROR([Specified --with-cuda=<path> doesn't look right. Check path.])
   fi
 fi
 
@@ -676,6 +689,7 @@ AC_SUBST([TAU_ROOT])
 AC_SUBST([TAU_LIBS])
 AC_SUBST([EPIK_ROOT])
 AC_SUBST([OPENUH_VERSION])
+AC_SUBST([CUDA_HOME])
 
 # List of configurable files to create in object directory.
 AC_CONFIG_FILES([
