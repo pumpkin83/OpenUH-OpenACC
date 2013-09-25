@@ -1,3 +1,0 @@
-It seems that the pi estimation is sensitive to the order of floating point operation.
-To disable FMA in GPU, compile the cuda code with -fmad=false, e.g.
-nvcc -arch=sm_35 --ptx -fmad=false acc-pi.w2c.cu
