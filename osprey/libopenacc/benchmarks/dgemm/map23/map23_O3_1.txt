@@ -1,9 +1,0 @@
-======== NVPROF is profiling pgi_mm...
-======== Command: pgi_mm 8192
-Execution time is: 34.90 s
-Sum of C is: 286285589719.000000
-======== Profiling result:
- Time(%)      Time   Calls       Avg       Min       Max  Name
-   99.22    34.10s       1    34.10s    34.10s    34.10s  iter_matmul_74_gpu
-    0.52  177.07ms       2   88.54ms   87.17ms   89.90ms  [CUDA memcpy HtoD]
-    0.27   92.66ms       1   92.66ms   92.66ms   92.66ms  [CUDA memcpy DtoH]
