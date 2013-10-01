@@ -442,7 +442,18 @@ typedef struct
 	char* szLimitName;
 	ST * acc_newIndex;
 	ST * acc_newLimit;
+	WN* wn_regionbody;
+	//this is used in parallel region, there may be some redundenccy execution code
 	WN * wn_following_nodes;
+	//for nonperfect loopnest
+	//for(.....)
+	//{
+	//	prehands nodes
+	//	for(....){}
+	//	afterhand nodes
+	//}
+	WN * wn_prehand_nodes;
+	WN * wn_afterhand_nodes;
 }FOR_LOOP_INFO;
 
 typedef enum
@@ -3924,7 +3935,8 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		//no matter what 's other clauses in this statement
 	    //generate whirl for add
 	    //
-
+		//doloop = WN_CreateDO(index, start, end, step, body, NULL);
+		//index = WN_CreateIdname(0,WN_st_idx(lcv));
 	   //If the reduction is not NULL, we need to conside it. acc_reduction;
 		//INT32 reduction_count;
 	   if(acc_loopinfo.acc_forloop[0].acc_reduction)
@@ -3935,18 +3947,20 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   TYPE_ID IndexType = acc_loopinfo.acc_forloop[0].acc_index_type;
 	   //sST* st_limit = acc_loopinfo.acc_forloop[0].acc_newLimit;//acc_loopinfo.acc_forloop[0].condition
 	   //////////////////////////////////////////////////////////////////////////////////////
-	   WN* IteratorIndexOpLhs1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), blockdimx, blockidx);
+	   WN* IteratorIndexOpLhs1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockidx));
 	   
 	   WN* IteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index), IteratorIndexOpLhs1);
 	   WN* wn_index = WN_Ldid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index));
-	   WN* IteratorIndexOpLhs2 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), wn_index, threadidx);
+	   WN* IteratorIndexOpLhs2 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(wn_index), WN_COPY_Tree(threadidx));
+	   IteratorIndexOpLhs2 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), IteratorIndexOpLhs2, 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
 	   
-	   WN* IteratorIndexOp1 = WN_Stid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index), IteratorIndexOpLhs2);
+	   WN* IteratorIndexInit = WN_Stid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index), IteratorIndexOpLhs2);
 	   //WN_INSERT_BlockFirst ( acc_stmt_block,  IteratorIndex);
 	   
-	   //IndexGenerationBlock = WN_CreateBlock ();	
+	   IndexGenerationBlock = WN_CreateBlock ();	
 	   WN_INSERT_BlockLast( IndexGenerationBlock,  IteratorIndexOp);
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  IteratorIndexOp1);
+	   //WN_INSERT_BlockLast( IndexGenerationBlock,  IteratorIndexInit);
 	   
 	   ST* st_new_tmp = New_ST( CURRENT_SYMTAB );
 	   char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
@@ -3956,23 +3970,30 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 
 		
 	   ST_Init(st_new_tmp, Save_Str( tmp_localname), CLASS_VAR, 
-					SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
+	   			SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
 		//GridWidthInThreads = blockDim.x * gridDim.x
-		blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
-					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
-	    WN* GridWidthInThreads = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), blockdimx, griddimx);
-		WN* WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp), GridWidthInThreads);
-		WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);
+		//blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+		//			0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
+	    WN* GridWidthInThreads = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(blockdimx), WN_COPY_Tree(griddimx));
+		WN* wn_WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp), GridWidthInThreads);
+		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_WidthOp);
+
+		GridWidthInThreads = WN_Ldid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp));
+		WN* wn_IndexStepRhs = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_index)), WN_COPY_Tree(wn_index), GridWidthInThreads);
+		WN* wn_IndexStep = WN_Stid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index), wn_IndexStepRhs);
+		//
 	   //Create do While
-	   wn_index = WN_Ldid(IndexType, 0, st_index, ST_type(st_index));
+	   //wn_index = WN_Ldid(IndexType, 0, st_index, ST_type(st_index));
 	   //WN* wn_limit = WN_Ldid(IndexType, 0, st_limit, ST_type(st_limit));
-	   WN* test = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
+	   WN* wn_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
+	   WN* wn_loopidame = WN_CreateIdname(0,st_index);
+	   WN* wn_forloop = WN_CreateDO(wn_loopidame, IteratorIndexInit, wn_for_test, wn_IndexStep, acc_loopinfo.acc_forloop[0].acc_loopbody, NULL);
 	   //WN_Relational (OPR_LT, TY_mtype(ST_type(st_index)), wn_index, wn_limit);
 	   
 	   /******************************************************************/
 	   //While BODY
 	   /******************************************************************/
-	   WN* Do_block = WN_CreateBlock ();
+	   /*WN* Do_block = WN_CreateBlock ();
 	   //WN* doLoopBody = acc_loopinfo.acc_forloop[0].acc_loopbody;
 	   
 		WN* ConditionalExe = WN_Relational (OPR_GE, TY_mtype(ST_type(st_index)), 
@@ -4003,11 +4024,11 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	    //use the block /thread info in cuda;
 	    //WN_INSERT_BlockLast ( acc_parallel_func, kernelfun_block );
 		
-	   /***********************************************/
-	   WN* whileDO = WN_CreateWhileDo(test, Do_block);
+	   
+	   WN* whileDO = WN_CreateWhileDo(test, Do_block);*/
 	   //localize the ST for the kernel body
 	   ACC_Localize_Parent_Stack lps(FALSE, NULL);
-	   WN_INSERT_BlockLast(IndexGenerationBlock, whileDO);
+	   WN_INSERT_BlockLast(IndexGenerationBlock, wn_forloop);
 	   ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
 	}
 	else if(acc_loopinfo.loopnum == 2)
@@ -4041,57 +4062,76 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		//WN* InnerTest = WN_Relational (OPR_LT, TY_mtype(ST_type(st_InnerIndex)), 
 		//							WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(wn_InnerLimit));
 		
-		WN* OuterIteratorIndexOp;			
-		WN* InnerIteratorIndexOp;
+		//WN* OuterIteratorIndexOp;			
+		//WN* InnerIteratorIndexOp;
 		WN* wn_InnerLoopBody = WN_CreateBlock ();
 		WN* wn_OutterLoopbody = WN_CreateBlock ();
+		WN* wn_InnerIndexInit = NULL;
+		WN* wn_OuterIndexInit = NULL;
+		WN* wn_InnerIndexStep = NULL;
+		WN* wn_OuterIndexStep = NULL;
+		
 
 	   if(OuterType ==  ACC_GANG && InnerType == ACC_VECTOR)
 	   {
-			WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
+			//wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			//							st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(threadidx), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
 
-			WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
+			//WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
 			
-			WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), WN_COPY_Tree(blockidx));
+			//wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+			//							st_OuterIndex, ST_type(st_OuterIndex), WN_COPY_Tree(blockidx));
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(blockidx), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterIndexInit);
 
 			
-			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(blockdimx));
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexStep);
 			
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
+			wn_OuterIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimx));
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexStep);
 			
 	   }
 	   else if(OuterType ==  ACC_GANG && InnerType == ACC_GANG_VECTOR)
 	   {
 			//Init part
 			//i=blockIdx.y
-			WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), WN_COPY_Tree(blockidy));
+			//wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+			//							st_OuterIndex, ST_type(st_OuterIndex), WN_COPY_Tree(blockidy));
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(blockidy), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  wn_OuterIndexInit);
 
-			WN* InnerInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexInit = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(blockidx), WN_COPY_Tree(blockdimx));
 			//j=blockIdx.x * blockDim.x ;
-			InnerInitndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerInitndexOp);
-			WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitndexOp);
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
+			WN_INSERT_BlockLast( wn_OutterLoopbody,  wn_InnerIndexInit);
 			//j = j + threadIdx.x;
-			InnerInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(threadidx));
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), wn_InnerIndexInit, 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
 			
-			InnerInitndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerInitndexOp);
-			WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitndexOp);
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
+			//WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitndexOp);
 			
 		   ST* st_new_tmp = New_ST( CURRENT_SYMTAB );
 		   char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
@@ -4114,17 +4154,17 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		
 			//load GridWidthInThreads
 			GridWidthInThreads = WN_Ldid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp));
-			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), GridWidthInThreads);
 
 			
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexStep);
 			
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
+			wn_OuterIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimy));
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexStep);
 
 	   }
 	   else if(OuterType ==  ACC_GANG_VECTOR && InnerType == ACC_VECTOR)
@@ -4139,19 +4179,25 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			
 			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitndexOp);
 			//i = i+ threadIdx.y;
-			OuterInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
+			wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(threadidy));
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), wn_OuterIndexInit, 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
 			
-			OuterInitndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), OuterInitndexOp);
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitndexOp);
+			wn_OuterIndexInit= WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
+			//wn_InnerIndexStepWN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitndexOp);
 			
 
 			//j=threadIdx.x
-			WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
+			//wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			//							st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(threadidx), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
 			
-			WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
+			//WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
 
 
 		   ST* st_new_tmp = New_ST( CURRENT_SYMTAB );
@@ -4176,18 +4222,18 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			
 			//load GridWidthInThreads
 			GridWidthInThreads = WN_Ldid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp));
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
+			wn_OuterIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), GridWidthInThreads);
 
 			
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexStep);
 			
-			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(blockdimx));
 			
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexStep);
 	   }
 	   else if(OuterType ==  ACC_GANG_VECTOR && InnerType == ACC_GANG_VECTOR)
        {
@@ -4196,17 +4242,19 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			WN* OuterInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(blockidy), WN_COPY_Tree(blockdimy));
 			//i=blockIdx.y * blockDim.y ;
-			OuterInitndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
 										st_OuterIndex, ST_type(st_OuterIndex), OuterInitndexOp);
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitndexOp);
+			WN_INSERT_BlockLast( IndexGenerationBlock,  wn_OuterIndexInit);
 			//i = i+ threadIdx.y;
-			OuterInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
+			wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(threadidy));
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), wn_OuterIndexInit, 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
 			
-			OuterInitndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), OuterInitndexOp);
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitndexOp);
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitndexOp);
 			//Init part, inner index
 			//j=blockIdx.x * blockDim.x + threadIdx.x
 			WN* InnerInitIndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_InnerIndex)), 
@@ -4217,12 +4265,14 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			
 			WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
 			//j = j+ threadIdx.x;
-			InnerInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(threadidx));
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), wn_InnerIndexInit, 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
 			
-			InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerInitIndexOp);
-			WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
+			//WN_INSERT_BlockLast( wn_OutterLoopbody,  InnerInitIndexOp);
 						
 			/////////////////////////////////////////////////////////////////////////////////////
 			//j=threadIdx.y
@@ -4273,23 +4323,23 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			GridWidthInThreadsOut= WN_Ldid(TY_mtype(ST_type(st_new_tmpOut)), 0, 
 										st_new_tmpOut, ST_type(st_new_tmpOut));
 			
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
+			wn_OuterIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), GridWidthInThreadsOut);
 
 			
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
-										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexStep);
 			
 			GridWidthInThreadsInner= WN_Ldid(TY_mtype(ST_type(st_new_tmpInner)), 0, 
 										st_new_tmpInner, ST_type(st_new_tmpInner));
 			
-			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
+			wn_InnerIndexStep = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), GridWidthInThreadsInner);
 			//InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 			//							WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(griddimy));
 			
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexStep);
    	   }
 	   else
 	   {
@@ -4300,36 +4350,55 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   /***********************************************************/
 	   /////////////////////////////////////////////////////////////
 	   //Let's begin analysis the statement in this kernel block
-	    WN* ConditionalExeL = WN_Relational (OPR_GE, TY_mtype(ST_type(st_OuterIndex)), 
-									WN_COPY_Tree(wn_OuterIndex), 
-									WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
-	    WN* ConditionalExeR = WN_Relational (OPR_GE, TY_mtype(ST_type(st_InnerIndex)), 
-									WN_COPY_Tree(wn_InnerIndex), 
-									WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
-	    WN* ConditionalExe = WN_LAND (ConditionalExeL, ConditionalExeR);
-		WN* doLoopBody = WN_CreateIf(ConditionalExe, 
-					acc_loopinfo.acc_forloop[1].acc_loopbody, 
-					WN_CreateBlock());
+	   //WN* ConditionalExeL = WN_Relational (OPR_GE, TY_mtype(ST_type(st_OuterIndex)), 
+	   //						WN_COPY_Tree(wn_OuterIndex), 
+		//							WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+	   // WN* ConditionalExeR = WN_Relational (OPR_GE, TY_mtype(ST_type(st_InnerIndex)), 
+		//							WN_COPY_Tree(wn_InnerIndex), 
+		//							WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+	    //WN* ConditionalExe = WN_LAND (ConditionalExeL, ConditionalExeR);
+		//WN* doLoopBody = WN_CreateIf(ConditionalExe, 
+		//			acc_loopinfo.acc_forloop[1].acc_loopbody, 
+		//			WN_CreateBlock());
 					
 		//Two nested DO-WHILE  block
 		//WN* InnerDOBlock = WN_CreateBlock();
 		//WN* OuterDOBlock = WN_CreateBlock();
-		
+	   WN* wn_Outer_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
+	   WN* wn_Inner_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[1].acc_test_stmt);
+	   //create inner for loop	   
+	   WN* wn_Innerloopidame = WN_CreateIdname(0,st_InnerIndex);
+	   WN* wn_innerforloop = WN_CreateDO(wn_Innerloopidame, wn_InnerIndexInit, wn_Inner_for_test, wn_InnerIndexStep, acc_loopinfo.acc_forloop[1].acc_loopbody, NULL);
 
-		WN_INSERT_BlockLast( wn_InnerLoopBody,  doLoopBody);
-		WN_INSERT_BlockLast( wn_InnerLoopBody,  InnerIteratorIndexOp);
-		WN* InnerTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[1].acc_test_stmt);
-		WN* whileDO = WN_CreateWhileDo(InnerTest, wn_InnerLoopBody);
+	   //handling nonperfect loopnest
+	   if(acc_loopinfo.acc_forloop[0].wn_prehand_nodes)
+	   	WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+	   
+	   WN_INSERT_BlockLast( wn_OutterLoopbody,	wn_innerforloop);
+	   
+	   //handling nonperfect loopnest
+	   if(acc_loopinfo.acc_forloop[0].wn_afterhand_nodes)
+	   	WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_afterhand_nodes);
+
+	   //Create Outer forloop
+	   WN* wn_Outerloopidame = WN_CreateIdname(0,st_OuterIndex);
+	   WN* wn_Outerforloop = WN_CreateDO(wn_Outerloopidame, wn_OuterIndexInit, wn_Outer_for_test, wn_OuterIndexStep, wn_OutterLoopbody, NULL);
+
+	   
+	   //WN_INSERT_BlockLast( wn_InnerLoopBody,  doLoopBody);
+	   //WN_INSERT_BlockLast( wn_InnerLoopBody,  InnerIteratorIndexOp);
+		//WN* InnerTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[1].acc_test_stmt);
+		//WN* whileDO = WN_CreateWhileDo(InnerTest, wn_InnerLoopBody);
 
 
-		WN_INSERT_BlockLast( wn_OutterLoopbody,  whileDO);			
-		WN_INSERT_BlockLast( wn_OutterLoopbody,  OuterIteratorIndexOp);
-		WN* OuterTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
-		whileDO = WN_CreateWhileDo(OuterTest, wn_OutterLoopbody);
+		//WN_INSERT_BlockLast( wn_OutterLoopbody,  whileDO);			
+		//WN_INSERT_BlockLast( wn_OutterLoopbody,  OuterIteratorIndexOp);
+		//WN* OuterTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
+		//whileDO = WN_CreateWhileDo(OuterTest, wn_OutterLoopbody);
 		///////////////////////////////////////////////////////   
 		//localize the ST for the kernel body
 		ACC_Localize_Parent_Stack lps(FALSE, NULL);		
-		WN_INSERT_BlockLast( IndexGenerationBlock,  whileDO);
+		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_Outerforloop);
 		ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
 	   
 	   /***********************************************************/
@@ -4339,8 +4408,8 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	{
 		//Outer loop, distribute across gangs, y direct
 		//Inner loop, distribute both gangs and threads, ()		
-	   ST* st_OutIndex = acc_loopinfo.acc_forloop[0].acc_index_st;
-	   TYPE_ID OutIndexType = acc_loopinfo.acc_forloop[0].acc_index_type;
+	   ST* st_OuterIndex = acc_loopinfo.acc_forloop[0].acc_index_st;
+	   TYPE_ID OuterIndexType = acc_loopinfo.acc_forloop[0].acc_index_type;
 	   //ST* st_OutLimit = acc_loopinfo.acc_forloop[0].acc_newLimit;
 	   
 	   ST* st_MidIndex = acc_loopinfo.acc_forloop[1].acc_index_st;
@@ -4360,8 +4429,8 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 								0, st_InnerIndex, ST_type(st_InnerIndex));
 		WN* wn_MidIndex = WN_Ldid(TY_mtype(ST_type(st_MidIndex)), 
 								0, st_MidIndex, ST_type(st_MidIndex));
-		WN* wn_OuterIndex = WN_Ldid(TY_mtype(ST_type(st_OutIndex)), 
-								0, st_OutIndex, ST_type(st_OutIndex));
+		WN* wn_OuterIndex = WN_Ldid(TY_mtype(ST_type(st_OuterIndex)), 
+								0, st_OuterIndex, ST_type(st_OuterIndex));
 		
 		WN* OuterIteratorIndexOp;				
 		WN* MidIteratorIndexOp;		
@@ -4370,14 +4439,24 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		WN* InnerDOBlock = WN_CreateBlock();
 		WN* MidDOBlock = WN_CreateBlock();
 		WN* OuterDOBlock = WN_CreateBlock();
+		WN* wn_InnerIndexInit = NULL;
+		WN* wn_MidIndexInit = NULL;
+		WN* wn_OuterIndexInit = NULL;
+		WN* wn_InnerIndexStep = NULL;
+		WN* wn_MidIndexStep = NULL;
+		WN* wn_OuterIndexStep = NULL;
 
 	   if(OutterType ==  ACC_GANG && MidType == ACC_GANG_VECTOR &&InnerType == ACC_VECTOR)
 	   {			
 	   		//i=blockIdx.x
-			WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(blockidx));
+			//WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
+			//							st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(blockidx));
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(blockidx), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 
 			WN* MidInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(blockidy), WN_COPY_Tree(blockdimy));
@@ -4389,16 +4468,23 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(threadidy));
 			
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
+	   		wn_MidIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+							MidInitndexOp, WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+			wn_MidIndexInit = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), wn_MidIndexInit);
 			
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 			
 			//k=threadidx.x
-			WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
+			//WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			//							st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
 			
-			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+			
+			//WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+							WN_COPY_Tree(threadidx), WN_COPY_Tree(acc_loopinfo.acc_forloop[2].init));
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
 			
 		   ST* st_new_tmp = New_ST( CURRENT_SYMTAB );
 		   char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
@@ -4420,7 +4506,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			/////////////////////////////////////////////
 			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(blockdimx));
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
 										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
 			//load GridWidthInThreads
 			GridWidthInThreads = WN_Ldid(TY_mtype(ST_type(st_new_tmp)), 0, st_new_tmp, ST_type(st_new_tmp));
@@ -4428,23 +4514,27 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_MidIndex), GridWidthInThreads);
 
 			
-			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			wn_MidIndexStep = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
 			
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimx));
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
 			
 
 	   }
 	   else if(OutterType ==  ACC_VECTOR && MidType == ACC_GANG_VECTOR &&InnerType == ACC_GANG_VECTOR)
 	   {			
 	   		//i=threadIdx.z
-			WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(threadidz));
+			//WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+			//							st_OuterIndex, ST_type(st_OuterIndex), WN_COPY_Tree(threadidz));
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(threadidz), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 
 			//j=blockIdx.y * blockDim.y ;
 			WN* MidInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
@@ -4456,10 +4546,12 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(threadidy));
 			
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
+	   		wn_MidIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+							MidInitndexOp, WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+			wn_MidIndexInit = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), wn_MidIndexInit);
 			
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 			
 			//k=blockIdx.x * blockDim.x ;
 			WN* InnerInitIndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_InnerIndex)), 
@@ -4471,10 +4563,13 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			InnerInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(threadidx));
 			
-			InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerInitIndexOp);
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+							InnerInitIndexOp, WN_COPY_Tree(acc_loopinfo.acc_forloop[2].init));
 			
-			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
+			
+			//WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
 			//InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
 			//							st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
 			
@@ -4518,7 +4613,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_InnerIndex), GridWidthInThreadsInner);
 
 			
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
 										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
 
 			
@@ -4532,23 +4627,27 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_MidIndex), GridWidthInThreadsMid);
 
 			
-			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			wn_MidIndexStep = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
 			
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(blockdimz));
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);			
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);			
 
 	   }
 	   else if(OutterType ==  ACC_VECTOR && MidType == ACC_GANG_VECTOR &&InnerType == ACC_GANG)
 	   {			
 	   		//i=threadIdx.x
-			WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(threadidx));
+			//WN* OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+			//							st_OuterIndex, ST_type(st_OuterIndex), WN_COPY_Tree(threadidx));
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
 
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(threadidx), 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 			//j=blockIdx.y * blockDim.y ;
 			WN* MidInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(blockidy), WN_COPY_Tree(blockdimy));
@@ -4557,18 +4656,24 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 			//j = j + threadIdx.y;
 			MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
-										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(threadidy));
+										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(threadidy));			
 			
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
+	   		wn_MidIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+								MidInitndexOp, WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
 			
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+			wn_MidIndexInit = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), wn_MidIndexInit);
+			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 			
 			//k=blockIdx.x ;			
-			WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(blockidx));
+			//WN* InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			//							st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(blockidx));
 			
-			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+			//WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+								WN_COPY_Tree(blockidx), WN_COPY_Tree(acc_loopinfo.acc_forloop[2].init));
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
 
 		  	//GridWidthInThreadsMid = blockdimy * griddimy, this will be used to update the mid index.
 		    ST* st_new_tmpMid = New_ST( CURRENT_SYMTAB );
@@ -4601,7 +4706,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			
 			InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(griddimx));
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
 										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
 			//Mid index update
 			GridWidthInThreadsMid = WN_Ldid(TY_mtype(ST_type(st_new_tmpMid)), 0, st_new_tmpMid, ST_type(st_new_tmpMid));
@@ -4609,13 +4714,13 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_MidIndex), GridWidthInThreadsMid);
 
 			
-			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			wn_MidIndexStep = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
 			//Outer index update
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(blockdimx));
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);			
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);			
 
 	   } 
 	   else if(OutterType ==  ACC_GANG_VECTOR && MidType == ACC_GANG_VECTOR &&InnerType == ACC_GANG_VECTOR)
@@ -4623,29 +4728,32 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   		//i=blockIdx.z * blockDim.z
 	   		
 			//j=blockIdx.y * blockDim.y ;
-			WN* OuterInitIndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_OutIndex)), 
+			WN* OuterInitIndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(blockidz), WN_COPY_Tree(blockdimz));
 			
-			OuterInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(OuterInitIndexOp), WN_COPY_Tree(threadidz));
 			
 			//MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
-			OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterInitIndexOp);
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), wn_OuterIndexInit, 
+	   								WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
 
 			//j=blockIdx.y * blockDim.y ;
 			WN* MidInitndexOp = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(blockidy), WN_COPY_Tree(blockdimy));
 			//j = j + threadIdx.y;
-			MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
+			wn_MidIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(MidInitndexOp), WN_COPY_Tree(threadidy));
 
-			
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
+			wn_MidIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+							wn_MidIndexInit, WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+			wn_MidIndexInit = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), wn_MidIndexInit);
 			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 			//j = j + threadIdx.y;
 			//MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
@@ -4654,7 +4762,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			//MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
 			
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 
 			
 			//k=blockIdx.x * blockDim.x ;
@@ -4664,10 +4772,12 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			InnerInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 										WN_COPY_Tree(InnerInitIndexOp), WN_COPY_Tree(threadidx));
 					
-			InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), InnerInitIndexOp);
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+						InnerInitIndexOp, WN_COPY_Tree(acc_loopinfo.acc_forloop[2].init));
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
 			
-			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
+			//WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
 
 		  	//GridWidthInThreadsMid = blockdimy * griddimy, this will be used to update the mid index.
 		  	
@@ -4730,7 +4840,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_InnerIndex), GridWidthInThreadsInner);
 
 			
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
 										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
 			
 			//InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
@@ -4743,18 +4853,18 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_MidIndex), GridWidthInThreadsMid);
 
 			
-			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			wn_MidIndexStep = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
 			//Outer index update
 			
 			GridWidthInThreadsOuter = WN_Ldid(TY_mtype(ST_type(st_new_tmpOuter)), 0, 
 											st_new_tmpOuter, ST_type(st_new_tmpOuter));
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), GridWidthInThreadsOuter);
 
 			
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
 			
 			//OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
 			//							WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(blockdimx));
@@ -4774,11 +4884,13 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			//							WN_COPY_Tree(OuterInitIndexOp), WN_COPY_Tree(threadidz));
 			
 			//MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
-			OuterInitIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), WN_COPY_Tree(blockidy));
+			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);	
+	   		wn_OuterIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					WN_COPY_Tree(blockidy), WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
+			wn_OuterIndexInit = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), wn_OuterIndexInit);
 			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
+			//WN_INSERT_BlockLast( IndexGenerationBlock,  OuterInitIndexOp);
 
 			//j=blockIdx.y * blockDim.y ;
 			WN* MidInitndexOp;// = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_MidIndex)), 
@@ -4788,8 +4900,10 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			//							WN_COPY_Tree(MidInitndexOp), WN_COPY_Tree(threadidy));
 
 			
-			MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
-										st_MidIndex, ST_type(st_MidIndex), WN_COPY_Tree(blockidx));
+			wn_MidIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+	   					WN_COPY_Tree(blockidx), WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
+			wn_MidIndexInit = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+										st_MidIndex, ST_type(st_MidIndex), wn_MidIndexInit);
 			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 			//j = j + threadIdx.y;
 			//MidInitndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
@@ -4798,7 +4912,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			//MidInitndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 			//							st_MidIndex, ST_type(st_MidIndex), MidInitndexOp);
 			
-			WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
+			//WN_INSERT_BlockLast( OuterDOBlock,  MidInitndexOp);
 
 			
 			//k=blockIdx.x * blockDim.x ;
@@ -4807,63 +4921,11 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			//k = k + threadIdx.x;
 			//InnerInitIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
 			//							WN_COPY_Tree(InnerInitIndexOp), WN_COPY_Tree(threadidx));
-					
-			InnerInitIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-										st_InnerIndex, ST_type(st_InnerIndex), WN_COPY_Tree(threadidx));
 			
-			WN_INSERT_BlockLast( MidDOBlock,  InnerInitIndexOp);
-
-		  	//GridWidthInThreadsMid = blockdimy * griddimy, this will be used to update the mid index.
-		  	
-		    /*ST* st_new_tmpOuter = New_ST( CURRENT_SYMTAB );
-		    char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
-		   
-		    sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-		    kernel_tmp_variable_count ++;
-
-			
-		    ST_Init(st_new_tmpOuter, Save_Str( tmp_localname), CLASS_VAR, 
-						SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-			//GridWidthInThreads = blockDim.z * gridDim.z
-		    WN* GridWidthInThreadsOuter = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_z)), 
-		    										WN_COPY_Tree(blockdimz), WN_COPY_Tree(griddimz));
-			WN* WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmpOuter)), 0, st_new_tmpOuter, 
-										ST_type(st_new_tmpOuter), GridWidthInThreadsOuter);
-			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);
-			////////////////////////////////////////////////////////////////////////////////
-		    ST* st_new_tmpMid = New_ST( CURRENT_SYMTAB );
-		    //char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
-		   
-		    sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-		    kernel_tmp_variable_count ++;
-
-			
-		    ST_Init(st_new_tmpMid, Save_Str( tmp_localname), CLASS_VAR, 
-						SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-			//GridWidthInThreads = blockDim.y * gridDim.y
-		    WN* GridWidthInThreadsMid = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_y)), 
-		    										WN_COPY_Tree(blockdimy), WN_COPY_Tree(griddimy));
-			WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmpMid)), 0, st_new_tmpMid, 
-										ST_type(st_new_tmpMid), GridWidthInThreadsMid);
-			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);
-			//////////////////////////////////////////////////////////
-		    ST* st_new_tmpInner = New_ST( CURRENT_SYMTAB );
-		    //char tmp_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
-		   
-		    sprintf ( tmp_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-		    kernel_tmp_variable_count ++;
-
-			
-		    ST_Init(st_new_tmpInner, Save_Str( tmp_localname), CLASS_VAR, 
-						SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-			//GridWidthInThreads = blockDim.x * gridDim.x
-		    WN* GridWidthInThreadsInner = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), 
-		    										WN_COPY_Tree(blockdimx), WN_COPY_Tree(griddimx));
-			WidthOp = WN_Stid(TY_mtype(ST_type(st_new_tmpInner)), 0, st_new_tmpInner, 
-										ST_type(st_new_tmpInner), GridWidthInThreadsInner);
-			
-			WN_INSERT_BlockLast( IndexGenerationBlock,  WidthOp);*/
+	   		wn_InnerIndexInit = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)), 
+	   					WN_COPY_Tree(threadidx), WN_COPY_Tree(acc_loopinfo.acc_forloop[2].init));
+			wn_InnerIndexInit = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+										st_InnerIndex, ST_type(st_InnerIndex), wn_InnerIndexInit);
 		    
 			//Finished init part
 			/////////////////////////////////////////////
@@ -4874,36 +4936,25 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 										WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(blockdimx));
 
 			
-			InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
+			wn_InnerIndexStep = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
 										st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
 			
-			//InnerIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_InnerIndex)), 
-			//							WN_COPY_Tree(wn_InnerIndex), WN_COPY_Tree(griddimx));
-			//InnerIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_InnerIndex)), 0, 
-			//							st_InnerIndex, ST_type(st_InnerIndex), InnerIteratorIndexOp);
-			//Mid index update
-			//GridWidthInThreadsMid = WN_Ldid(TY_mtype(ST_type(st_new_tmpMid)), 0, st_new_tmpMid, ST_type(st_new_tmpMid));
 			MidIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_MidIndex)), 
 										WN_COPY_Tree(wn_MidIndex), WN_COPY_Tree(griddimx));
 
 			
-			MidIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
+			wn_MidIndexStep = WN_Stid(TY_mtype(ST_type(st_MidIndex)), 0, 
 										st_MidIndex, ST_type(st_MidIndex), MidIteratorIndexOp);
 			//Outer index update
 			
 			//GridWidthInThreadsOuter = WN_Ldid(TY_mtype(ST_type(st_new_tmpOuter)), 0, 
 			//								st_new_tmpOuter, ST_type(st_new_tmpOuter));
-			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
+			OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OuterIndex)), 
 										WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(griddimy));
 
 			
-			OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-										st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);
-			
-			//OuterIteratorIndexOp = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_OutIndex)), 
-			//							WN_COPY_Tree(wn_OuterIndex), WN_COPY_Tree(blockdimx));
-			//OuterIteratorIndexOp = WN_Stid(TY_mtype(ST_type(st_OutIndex)), 0, 
-			//							st_OutIndex, ST_type(st_OutIndex), OuterIteratorIndexOp);			
+			wn_OuterIndexStep = WN_Stid(TY_mtype(ST_type(st_OuterIndex)), 0, 
+										st_OuterIndex, ST_type(st_OuterIndex), OuterIteratorIndexOp);
 
 	   }
 	   else
@@ -4919,8 +4970,46 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   //Let's begin analysis the statement in this kernel block	   
 
 		//WN* doLoopBody = acc_loopinfo.acc_forloop[2].acc_loopbody;	
+	   WN* wn_Outer_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
+	   WN* wn_Mid_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[1].acc_test_stmt);
+	   WN* wn_Inner_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[2].acc_test_stmt);
+	   //create inner for loop	   
+	   WN* wn_Innerloopidame = WN_CreateIdname(0,st_InnerIndex);
+	   WN* wn_innerforloop = WN_CreateDO(wn_Innerloopidame, wn_InnerIndexInit, wn_Inner_for_test, wn_InnerIndexStep, acc_loopinfo.acc_forloop[2].acc_loopbody, NULL);
+
+	   //handling nonperfect loopnest
+	   if(acc_loopinfo.acc_forloop[1].wn_prehand_nodes)
+	   	WN_INSERT_BlockLast( MidDOBlock,	acc_loopinfo.acc_forloop[1].wn_prehand_nodes);
 	   
-	    WN* ConditionalExeL = WN_Relational (OPR_GE, TY_mtype(ST_type(st_OutIndex)), 
+	   WN_INSERT_BlockLast( MidDOBlock,	wn_innerforloop);
+	   
+	   //handling nonperfect loopnest
+	   if(acc_loopinfo.acc_forloop[1].wn_afterhand_nodes)
+	   	WN_INSERT_BlockLast( MidDOBlock,	acc_loopinfo.acc_forloop[1].wn_afterhand_nodes);
+
+	   //create inner for loop	   
+	   WN* wn_Midloopidame = WN_CreateIdname(0,st_MidIndex);
+	   WN* wn_Midforloop = WN_CreateDO(wn_Midloopidame, wn_MidIndexInit, wn_Mid_for_test, wn_MidIndexStep, MidDOBlock, NULL);
+
+	   //handling nonperfect loopnest
+	   if(acc_loopinfo.acc_forloop[0].wn_prehand_nodes)
+	   	WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+	   
+	   WN_INSERT_BlockLast( OuterDOBlock,	wn_Midforloop);
+	   
+	   //handling nonperfect loopnest
+	   if(acc_loopinfo.acc_forloop[0].wn_afterhand_nodes)
+	   	WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_afterhand_nodes);
+	   
+
+	   //Create Outer forloop
+	   WN* wn_Outerloopidame = WN_CreateIdname(0,st_OuterIndex);
+	   WN* wn_Outerforloop = WN_CreateDO(wn_Outerloopidame, wn_OuterIndexInit, wn_Outer_for_test, wn_OuterIndexStep, OuterDOBlock, NULL);
+
+
+	   
+	   
+	    /*WN* ConditionalExeL = WN_Relational (OPR_GE, TY_mtype(ST_type(st_OuterIndex)), 
 									WN_COPY_Tree(wn_OuterIndex), 
 									WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
 		
@@ -4952,10 +5041,10 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		WN_INSERT_BlockLast( OuterDOBlock,  whileDO);			
 		WN_INSERT_BlockLast( OuterDOBlock,  OuterIteratorIndexOp);
 		WN* OuterTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
-		whileDO = WN_CreateWhileDo(OuterTest, OuterDOBlock);   
+		whileDO = WN_CreateWhileDo(OuterTest, OuterDOBlock);   */
 		//localize the ST for the kernel body
 		ACC_Localize_Parent_Stack lps(FALSE, NULL);
-		WN_INSERT_BlockLast( IndexGenerationBlock,  whileDO);
+		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_Outerforloop);
 		ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
 		///////////////////////////////////////////////////////
 	   
@@ -5197,12 +5286,19 @@ static void ACC_Extract_ACC_LoopNest_Info( WN * tree )
 	  forloopinfo.incr = acc_stride_node[0];
 	  forloopinfo.acc_loopbody = acc_doloop_body;
 	  forloopinfo.acc_test_stmt = acc_test_stmt;
+	  forloopinfo.wn_regionbody = WN_COPY_Tree(pdo_node);
 
 	  acc_loopinfo.acc_forloop.push_back(forloopinfo);
 	  acc_loopinfo.loopnum ++;
 
 	  //Traverse first.
 	  int loopcount = 0;
+	  int current_loop_level = acc_loopinfo.loopnum;
+	  WN* wn_handlist = NULL, *wn_cur_node; 
+	  //currently, only triple nested loop is supported.
+	  if(acc_loopinfo.loopnum == 3)
+	  	return;
+	  //WN* wn_afterhandlist = NULL
 	  for (cur_node = WN_first(acc_doloop_body); cur_node; cur_node = next_node) 
 	  {
 
@@ -5216,12 +5312,34 @@ static void ACC_Extract_ACC_LoopNest_Info( WN * tree )
 	       WN_pragma(WN_first(WN_region_pragmas(cur_node))) ==
 						WN_PRAGMA_ACC_LOOP_BEGIN) 
 			{	
+				acc_loopinfo.acc_forloop[current_loop_level - 1].wn_prehand_nodes
+						= wn_handlist;
+				wn_handlist = NULL;
 				loopcount ++;
 				Is_True(loopcount == 1 && acc_loopinfo.loopnum <= 4, 
-								("no multi ACC loop in another ACC LOOP"));
+								("no multi ACC loop in one ACC LOOP"));
 	  			ACC_Extract_ACC_LoopNest_Info(cur_node);
 			}
+			else if(WN_opcode(cur_node) != OPC_REGION_EXIT
+					&& WN_opcode(cur_node) != OPC_LABEL)
+			{
+				if(wn_handlist == NULL)
+				{
+					wn_cur_node = wn_handlist = WN_COPY_Tree(cur_node);
+					WN_next(wn_handlist) = NULL;
+					WN_prev(wn_handlist) = NULL;
+				}
+				else
+				{
+					//wn_handlist = WN_COPY_Tree(cur_node);
+					WN_next(wn_cur_node) = WN_COPY_Tree(cur_node);
+					WN_prev(WN_next(wn_cur_node)) = wn_cur_node;
+				}
+			 }
 	  }
+	  
+	  acc_loopinfo.acc_forloop[current_loop_level - 1].wn_afterhand_nodes
+						= wn_handlist;
 	  //ACC_Extract_ACC_LoopNest_Info(pdo_node);
 	  //Here generate the kernel code
       //WN *return_wn = ACC_Transform_ForLoop( pdo_node);
