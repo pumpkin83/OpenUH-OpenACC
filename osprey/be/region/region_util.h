@@ -571,6 +571,9 @@ extern BOOL REGION_is_EH(WN *);
 /* tell if a region is an MP region based on WHIRL pragmas */
 extern BOOL REGION_is_mp(WN *);
 
+/* tell if a region is an MP region based on WHIRL pragmas */
+extern BOOL REGION_is_acc(WN *);
+
 #if defined(TARG_SL2)
 /* tell if a region is an SL2 region based on WHIRL kind */
 extern BOOL REGION_is_sl2_para(WN*); 
