@@ -3796,7 +3796,7 @@ STMTREP::Has_mu(void) const
     if (Bb()->Kind() == BB_REGIONSTART || Bb()->Kind() == BB_REGIONEXIT) {
       RID *rid = Bb()->Regioninfo()->Rid();
       Is_True(rid != NULL, ("STMTREP::Has_mu, NULL RID"));
-      if (RID_TYPE_mp(rid) || RID_TYPE_eh(rid))
+      if (RID_TYPE_acc(rid) || RID_TYPE_mp(rid) || RID_TYPE_eh(rid))
 	return FALSE;
     }
   }
@@ -3810,7 +3810,7 @@ STMTREP::Has_chi(void) const
     if (Bb()->Kind() == BB_REGIONSTART || Bb()->Kind() == BB_REGIONEXIT) {
       RID *rid = Bb()->Regioninfo()->Rid();
       Is_True(rid != NULL, ("STMTREP::Has_chi, NULL RID"));
-      if (RID_TYPE_mp(rid) || RID_TYPE_eh(rid))
+      if (RID_TYPE_acc(rid) || RID_TYPE_mp(rid) || RID_TYPE_eh(rid))
 	return FALSE;
     }
   }

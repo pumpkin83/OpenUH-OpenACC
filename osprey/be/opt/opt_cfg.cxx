@@ -115,6 +115,8 @@ CFG::CFG(MEM_POOL *pool, MEM_POOL *lpool)
        _agoto_succ_vec(pool),
        _mp_rid(pool),
        _mp_type(pool),
+       _acc_rid(pool),
+       _acc_type(pool),
 #if defined(TARG_SL) //PARA_EXTENSION
        _sl2_para_rid(pool),
        _sl2_para_type(pool),
@@ -2674,6 +2676,13 @@ CFG::Add_one_region( WN *wn, END_BLOCK *ends_bb )
       Push_mp_type(MP_REGION);
     Push_mp_rid(rid);
   }
+  else if (REGION_is_acc(wn)) {
+    if ( Is_region_with_pragma(wn,WN_PRAGMA_ACC_LOOP_BEGIN) )
+      Push_acc_type(ACC_LOOP);
+    else
+      Push_acc_type(ACC_REGION);
+    Push_acc_rid(rid);
+  }
 
 #if defined(TARG_SL)
   if (REGION_is_sl2_para(wn)) {
@@ -2694,6 +2703,13 @@ CFG::Add_one_region( WN *wn, END_BLOCK *ends_bb )
       (void) New_bb(TRUE, BB_REGIONEXIT);
     Pop_mp_type();
     Pop_mp_rid();
+  }
+  else if (REGION_is_acc(wn)) {
+    // add an empty region exit block for MP regions
+    if (_current_bb->Kind() != BB_REGIONEXIT)
+      (void) New_bb(TRUE, BB_REGIONEXIT);
+    Pop_acc_type();
+    Pop_acc_rid();
   }
 #if defined(TARG_SL)
   if (REGION_is_sl2_para(wn)) {
@@ -3730,7 +3746,7 @@ CFG::Process_multi_entryexit( BOOL is_whirl )
 // region because multiple exits don't fit a stack model.
 // ====================================================================
 void
-CFG::Ident_mp_regions(void)
+CFG::Ident_mp_acc_regions(void)
 {
   CFG_ITER cfg_iter(this);
   BB_NODE *bb;
@@ -3744,10 +3760,15 @@ CFG::Ident_mp_regions(void)
   FOR_ALL_NODE( bb, cfg_iter, Init() ) {
     if (bb->Kind() == BB_REGIONSTART) {
       bb_region = bb->Regioninfo();
-      Is_True(bb_region != NULL, ("CFG::Ident_mp_regions, no regioninfo"));
+      Is_True(bb_region != NULL, ("CFG::Ident_mp_acc_regions, no regioninfo"));
       if (RID_TYPE_mp(bb_region->Rid())) {
 	Push_mp_type(MP_REGION);
 	Push_mp_rid(bb_region->Rid());
+	Push_bb_region(bb_region);
+      }
+      else if (RID_TYPE_acc(bb_region->Rid())) {
+	Push_acc_type(ACC_REGION);
+	Push_acc_rid(bb_region->Rid());
 	Push_bb_region(bb_region);
       }
     }
@@ -3760,10 +3781,15 @@ CFG::Ident_mp_regions(void)
     // an MP region has a BB_REGIONEXIT even though it has no OPC_REGION_EXIT
     if (bb->Kind() == BB_REGIONEXIT) {
       bb_region = bb->Regioninfo();
-      Is_True(bb_region != NULL, ("CFG::Ident_mp_regions, no regioninfo"));
+      Is_True(bb_region != NULL, ("CFG::Ident_mp_acc_regions, no regioninfo"));
       if (RID_TYPE_mp(bb_region->Rid())) {
 	Pop_mp_type();
 	Pop_mp_rid();
+	Pop_bb_region();
+      }
+	  else if (RID_TYPE_acc(bb_region->Rid())) {
+	Pop_acc_type();
+	Pop_acc_rid();
 	Pop_bb_region();
       }
     }
@@ -3951,7 +3977,7 @@ CFG::Create(WN *func_wn, BOOL lower_fully, BOOL calls_break,
  
   Process_multi_entryexit( TRUE/*is_whirl*/ );
 
-  Ident_mp_regions();
+  Ident_mp_acc_regions();
 
 #if defined(TARG_SL) //PARA_EXTENSION
   Ident_sl2_para_regions();

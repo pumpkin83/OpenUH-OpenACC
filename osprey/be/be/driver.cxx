@@ -1486,7 +1486,7 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
     }
     Set_Error_Phase ( "LNO Processing" );
 
-    if (Run_lno || Run_Distr_Array || Run_preopt || Run_autopar) {
+    if ((!isOpenACCRegion) && (Run_lno || Run_Distr_Array || Run_preopt || Run_autopar)) {
 #ifdef KEY // to avoid assertion in PU that represents file-scope asm statement
 	if (! (WN_operator(pu) == OPR_FUNC_ENTRY && 
 	       ST_asm_function_st(*WN_st(pu)))) 
