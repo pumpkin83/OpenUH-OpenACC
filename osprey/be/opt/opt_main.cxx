@@ -1307,8 +1307,10 @@ Pre_Optimizer(INT32 phase, WN *wn_tree, DU_MANAGER *du_mgr,
 
 #ifdef KEY
     // No uplevel reference spliting for openmp
-    if ((PU_has_mp (Get_Current_PU ()) == FALSE) && 
-        (PU_mp(Get_Current_PU ()) == FALSE))
+    if (((PU_has_mp (Get_Current_PU ()) == FALSE) && 
+        (PU_mp(Get_Current_PU ()) == FALSE)) 
+        || ((PU_has_acc (Get_Current_PU ()) == FALSE) && 
+        (PU_acc(Get_Current_PU ()) == FALSE)))
       actions |= LOWER_UPLEVEL;
 #endif
     

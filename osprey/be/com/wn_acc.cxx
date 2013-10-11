@@ -41,7 +41,10 @@
   For further information regarding this notice, see:
 
   http://oss.sgi.com/projects/GenInfo/NoticeExplan
-
+ ***************************************************************************
+  This file is created by Xiaonan(Daniel) Tian from HPCTools, University of Houston
+  (daniel.xntian@gmail.com) for OpenUH OpenACC compiler.
+  It is intended to lower the OpenACC pragma.
 */
 
 #include <stdint.h>
@@ -504,7 +507,25 @@ PARALLEL_LOOP_INFO acc_parallel_loop_info;
 
 
 #define WN_ACC_Compare_Trees(x,y)	(WN_Simp_Compare_Trees(x,y))  
-	
+
+typedef struct ACC_DREGION__ENTRY
+{
+	WN* acc_data_clauses;
+	WN* acc_data_length;
+}ACC_DREGION__ENTRY;
+
+vector<ACC_DREGION__ENTRY> acc_dregion_pcreate;
+vector<ACC_DREGION__ENTRY> acc_dregion_pcopy;
+vector<ACC_DREGION__ENTRY> acc_dregion_pcopyin;
+vector<ACC_DREGION__ENTRY> acc_dregion_pcopyout;
+vector<ACC_DREGION__ENTRY> acc_dregion_present;
+vector<ACC_DREGION__ENTRY> acc_dregion_host;
+vector<ACC_DREGION__ENTRY> acc_dregion_device;
+vector<ACC_DREGION__ENTRY> acc_dregion_private;
+vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
+
+
+
 typedef ST * ACC_SHARED_TABLE;
 
 // Generic type for parallel runtime routines
@@ -524,7 +545,7 @@ static ACCP_process_type acc_t;
 
 static WN *acc_host_nodes;
 static WN *acc_device_nodes;
-
+static WN *acc_dlength_node;
 static WN *acc_stmt_block;		/* Original statement nodes */
 static WN *acc_cont_nodes;		/* Statement nodes after acc code */
 static WN *acc_if_node;		/* Points to (optional) if node */
@@ -556,24 +577,12 @@ static WN *acc_present_or_create_nodes;
 static WN *acc_deviceptr_nodes;
 static WN *acc_private_nodes;
 static WN *acc_firstprivate_nodes;
-static UINT32 acc_create_count;
-static UINT32 acc_present_count;
-static UINT32 acc_present_or_copy_count;
-static UINT32 acc_present_or_copyin_count;
-static UINT32 acc_present_or_copyout_count;
-static UINT32 acc_present_or_create_count;
-static UINT32 acc_deviceptr_count;
-static UINT32 acc_private_count;
-static UINT32 acc_firstprivate_count;
+
 
 static WN* acc_AsyncExpr = NULL;
 static WN* acc_async_nodes;   /* async int expression */
 static WN* acc_clause_intnum;	/*Int expression, it's for integer expression, e.g, in wait pragma*/
-static INT32 acc_local_data_count;
-static INT32 acc_copyin_count;	/* Count of copyins */
-static INT32 acc_copyout_count;	/* Count of copyouts */
-static INT32 acc_copy_count;	/* Count of copys */
-static INT32 acc_parms_count;	/* Count of parm */
+
 //This table is used to localize the ST  which is used in kernel/parallel region.
 static ACC_VAR_TABLE* acc_local_var_table;		//All the data in the kernel function
 //static ACC_VAR_TABLE *acc_copy_var_table;	    	/* Table of variable substitutions */
@@ -675,6 +684,13 @@ INT32 acc_construct_num = 1; // construct number within MP region
 //structure for preserve data region info
 typedef struct
 {
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcreate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopy;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopyin;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopyout;
+	vector<ACC_DREGION__ENTRY> acc_dregion_present;
+	vector<ACC_DREGION__ENTRY> acc_dregion_private;
+	vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
 	WN * acc_if_node;
 	WN * acc_copy_nodes;		/* Points to (optional) copy nodes */
 	WN * acc_copyin_nodes;	/* Points to (optional) copyin nodes */
@@ -709,6 +725,14 @@ static DataRegion acc_nested_dregion_info;
 //structure for preserve kernels region info
 typedef struct
 {
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcreate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopy;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopyin;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopyout;
+	vector<ACC_DREGION__ENTRY> acc_dregion_present;
+	vector<ACC_DREGION__ENTRY> acc_dregion_private;
+	vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
+	//////////////////////////////////////////////////////
 	WN * acc_if_node;
 	WN * acc_copy_nodes;		/* Points to (optional) copy nodes */
 	WN * acc_copyin_nodes;	/* Points to (optional) copyin nodes */
@@ -738,6 +762,14 @@ typedef struct
 //structure for preserve parallel region info
 typedef struct
 {
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcreate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopy;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopyin;
+	vector<ACC_DREGION__ENTRY> acc_dregion_pcopyout;
+	vector<ACC_DREGION__ENTRY> acc_dregion_present;
+	vector<ACC_DREGION__ENTRY> acc_dregion_private;
+	vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
+	////////////////////////////////////////////////////////////////
 	WN * acc_if_node;
 	WN * acc_copy_nodes;		/* Points to (optional) copy nodes */
 	WN * acc_copyin_nodes;	/* Points to (optional) copyin nodes */
@@ -796,7 +828,7 @@ static WN* ACC_Process_UpdateRegion( WN * tree );
 static WN* ACC_Process_CacheRegion( WN * tree );
 static WN* ACC_Process_DeclareRegion( WN * tree );
 static WN* ACC_Process_DataRegion( WN * tree );
-static WN *LaunchKernel (int index, WN* wn_replace_block);
+static WN *LaunchKernel (int index, WN* wn_replace_block, BOOL bParallelRegion);
 static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node);
 
 
@@ -1295,25 +1327,19 @@ inline WN_OFFSET WN_offsetx ( WN *wn )
 
 //WN node must have a kid which includes buffer region
 //wnArr is a pragma wn node which includes variable declaration
-static WN* ACC_GetArraySizeInUnit(WN* wnArr)
+static WN* ACC_GetArraySizeInUnit(ACC_DREGION__ENTRY dEntry)
 {
+	WN* wnArr = dEntry.acc_data_clauses;
+	WN* wnLength = dEntry.acc_data_length;
+	
 	ST* stArr = WN_st(wnArr);
 	TY_IDX ty = ST_type(stArr);
 	TY_KIND kind = TY_kind(ty);
-	WN* wnRegion = WN_kid0(wnArr);
-	OPCODE op = WN_opcode(wnRegion);
-  	OPERATOR opr = OPCODE_operator(op);
-	WN* wnLower = NULL;
-	OPCODE oplower;
-	//upper is the length
-	WN* wnUpper = NULL;
-	OPCODE opupper;
-	//
-	Is_True((op==OPC_I4I4LT) && (opr==OPR_LT), ("wrong syntax in whirl buffer region syntax."));
-	wnLower = WN_kid0(WN_kid0(wnArr));
-	oplower = WN_opcode(wnLower);
-	wnUpper = WN_kid1(WN_kid0(wnArr));
-	opupper = WN_opcode(wnUpper);
+	
+	WN* wnLower = WN_kid0(wnArr);
+	OPCODE oplower = WN_opcode(wnLower);
+	WN* wnUpper = wnLength;
+	OPCODE opupper = WN_opcode(wnUpper);
 	//Two cases: array with no region limite which mean the entire array; buffer with region declaration
 	if((oplower==OPC_I4INTCONST) && (oplower==opupper)
 			&& (WN_const_val(wnLower) == 0)
@@ -1486,24 +1512,19 @@ static WN* ACC_Load_MultiDimArray_StartAddr(WN* wnArr)
 //WN node must have a kid which includes buffer region
 //wnArr is a pragma wn node which includes variable declaration
 //return the offset of the array buffer. It is in byte.
-static WN* ACC_GetArrayStart(WN* wnArr)
+static WN* ACC_GetArrayStart(ACC_DREGION__ENTRY dEntry)
 {
+	WN* wnArr = dEntry.acc_data_clauses;
+	WN* wnLength = dEntry.acc_data_length;
+	
 	ST* stArr = WN_st(wnArr);
 	TY_IDX ty = ST_type(stArr);
 	TY_KIND kind = TY_kind(ty);
-	WN* wnRegion = WN_kid0(wnArr);
-	OPCODE op = WN_opcode(wnRegion);
-  	OPERATOR opr = OPCODE_operator(op);
-	WN* wnLower = NULL;
-	OPCODE oplower;
-	WN* wnUpper = NULL;
-	OPCODE opupper;
-	//
-	Is_True((op==OPC_I4I4LT) && (opr==OPR_LT), ("wrong syntax in whirl buffer region syntax."));
-	wnLower = WN_kid0(WN_kid0(wnArr));
-	oplower = WN_opcode(wnLower);
-	wnUpper = WN_kid1(WN_kid0(wnArr));
-	opupper = WN_opcode(wnUpper);
+	
+	WN* wnLower = WN_kid0(wnArr);
+	OPCODE oplower = WN_opcode(wnLower);
+	WN* wnUpper = wnLength;
+	OPCODE opupper = WN_opcode(wnUpper);
 	//Two cases: array with no region limite which mean the entire array; buffer with region declaration
 	if((oplower==OPC_I4INTCONST)
 			&& (WN_const_val(wnLower) == 0))
@@ -1540,25 +1561,19 @@ static WN* ACC_GetArrayStart(WN* wnArr)
 
 //WN node must have a kid which includes buffer region
 //return the size of the array buffer. It is in byte.
-static WN* ACC_GetArraySize(WN* wnArr)
+static WN* ACC_GetArraySize(ACC_DREGION__ENTRY dEntry)
 {
+	WN* wnArr = dEntry.acc_data_clauses;
+	WN* wnLength = dEntry.acc_data_length;
+	
 	ST* stArr = WN_st(wnArr);
 	TY_IDX ty = ST_type(stArr);
 	TY_KIND kind = TY_kind(ty);
-	WN* wnRegion = WN_kid0(wnArr);
-	OPCODE op = WN_opcode(wnRegion);
-  	OPERATOR opr = OPCODE_operator(op);
-	WN* wnLower = NULL;
-	OPCODE oplower;
-	//upper is the length
-	WN* wnUpper = NULL;
-	OPCODE opupper;
-	//
-	Is_True((op==OPC_I4I4LT) && (opr==OPR_LT), ("wrong syntax in whirl buffer region syntax."));
-	wnLower = WN_kid0(WN_kid0(wnArr));
-	oplower = WN_opcode(wnLower);
-	wnUpper = WN_kid1(WN_kid0(wnArr));
-	opupper = WN_opcode(wnUpper);
+	
+	WN* wnLower = WN_kid0(wnArr);
+	OPCODE oplower = WN_opcode(wnLower);
+	WN* wnUpper = wnLength;
+	OPCODE opupper = WN_opcode(wnUpper);
 	//Two cases: array with no region limite which mean the entire array; buffer with region declaration
 	if((oplower==OPC_I4INTCONST) && (oplower==opupper)
 			&& (WN_const_val(wnLower) == 0)
@@ -1875,7 +1890,7 @@ ACC_Add_DST_variable ( ST *st, DST_INFO_IDX parent_dst,
 }
 
 /*****************************************/
-static void Push_Kernel_Parameters(WN* wn_replaceBlock)
+static void Push_Kernel_Parameters(WN* wn_replaceBlock, BOOL bParallel)
 {
 	WN* wnx, *wn;
 	int parm_id = 0;
@@ -1998,7 +2013,8 @@ static void Push_Kernel_Parameters(WN* wn_replaceBlock)
 	}
 	//launch the reduction parameters
 	i=0;
-	while(i<acc_loopinfo.acc_forloop[0].reductionmap.size())
+	//Only kernel region doing the reduction this way
+	while(!bParallel && (i<acc_loopinfo.acc_forloop[0].reductionmap.size()))
 	{
 		ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[i];
 		////////////////////////////////////////////////////////////////////////////
@@ -6207,7 +6223,7 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	WN_INSERT_BlockLast(acc_parallel_func, wn_parallelBlock);
 	
 	//launch kernels
-	LaunchKernel(0, wn_replace_block);
+	//LaunchKernel(0, wn_replace_block, TRUE);
 
 	BZERO ( acc_local_var_table, ssize );
 		
@@ -6237,7 +6253,7 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	//setup the gangs and vectors
 	ACC_Setup_GPU_toplogy_parallel(pPRInfo, wn_replace_block);
 	//launch kernels
-	LaunchKernel(0, wn_replace_block);
+	LaunchKernel(0, wn_replace_block, TRUE);
 
 }
 
@@ -6315,7 +6331,7 @@ Transform_ACC_Kernel_Block ( WN * tree, KernelsRegionInfo* pKRInfo, WN* wn_repla
 			////////////////////////////////////////////////
 			ACC_Transform_MultiForLoop(pKRInfo);
 			//launch kernels
-			LaunchKernel(iKernelsCount-1, wn_replace_block);
+			LaunchKernel(iKernelsCount-1, wn_replace_block, FALSE);
 			//If there is some kind of reduction
 			i = 0;
 			while(i<acc_loopinfo.acc_forloop[0].reductionmap.size())
@@ -6812,7 +6828,7 @@ static void ACC_Retrieve_Kernel_Param_From_Liveness(ACC_VAR_Liveness * pHead)
 		   if (wn == NULL) {
 			 WN_next(newNode) = acc_private_nodes;
 			 acc_private_nodes = newNode;
-			 ++acc_private_count;
+			 //++acc_private_count;
 		   } else
 			 WN_Delete ( newNode );
 		   
@@ -6830,7 +6846,7 @@ static void ACC_Retrieve_Kernel_Param_From_Liveness(ACC_VAR_Liveness * pHead)
 		   {
 			 WN_next(newNode) = acc_parms_nodes;
 			 acc_parms_nodes = newNode;
-			 ++acc_parms_count;
+			 //++acc_parms_count;
 		   } 
 		   else
 			 WN_Delete (newNode);		   
@@ -7672,7 +7688,7 @@ static void ACC_Handle_Kernels_Loops( WN* stmt_block, KernelsRegionInfo* pKRInfo
 
 } // Process_ACC_Region()
 
-static WN *LaunchKernel (int index, WN* wn_replace_block)
+static WN *LaunchKernel (int index, WN* wn_replace_block, BOOL bParallel)
 {	
 	WN * wn;
 	WN * wnx;
@@ -7681,7 +7697,7 @@ static WN *LaunchKernel (int index, WN* wn_replace_block)
 	UINT32 i = 0;
 	int parm_id = 0;
 	//make the kernels parameters ready first
-	Push_Kernel_Parameters(wn_replace_block);
+	Push_Kernel_Parameters(wn_replace_block, bParallel);
 
 	//Then launch the kernel module
 	//create whirl CALL
@@ -7808,8 +7824,17 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
 	acc_deviceptr_nodes = NULL;
 	acc_private_nodes = NULL;
 	acc_pHeadLiveness = NULL;
-		
-	acc_create_count = 0;
+
+	acc_dregion_pcreate.clear();
+	acc_dregion_pcopy.clear();
+	acc_dregion_pcopyin.clear();
+	acc_dregion_pcopyout.clear();
+	acc_dregion_present.clear();
+	acc_dregion_host.clear();
+	acc_dregion_device.clear();
+	acc_dregion_private.clear();
+	acc_dregion_fprivate.clear();
+	/*acc_create_count = 0;
 	acc_present_count = 0;
 	acc_present_or_copy_count = 0;
 	acc_present_or_copyin_count = 0;
@@ -7817,17 +7842,17 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
 	acc_present_or_create_count = 0;
 	acc_deviceptr_count = 0;
 	acc_private_count = 0;
-	acc_firstprivate_count = 0;
+	acc_firstprivate_count = 0;*/
 
 	is_pcreate_tmp_created = FALSE;
 
   acc_collapse_count = 0;   /* collapse count */
   acc_clause_intnum = 0;	  /*Int expression, it's for integer expression, e.g, in wait pragma*/
-  acc_copyin_count = 0;  /* Count of copyins */
-  acc_copyout_count = 0; /* Count of copyouts */
-  acc_copy_count = 0;	  /* Count of copys */
+  //acc_copyin_count = 0;  /* Count of copyins */
+  //acc_copyout_count = 0; /* Count of copyouts */
+  //acc_copy_count = 0;	  /* Count of copys */
   acc_async_nodes = 0;
-  acc_parms_count = 0;
+  //acc_parms_count = 0;
   acc_reduction_count = 0;
   acc_kernel_functions_st.clear();
   //nested data region info reset
@@ -7944,6 +7969,15 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
 		sDRegionInfo.acc_present_or_copyout_nodes = acc_present_or_copyout_nodes;
 		sDRegionInfo.acc_present_or_create_nodes = acc_present_or_create_nodes;
 		sDRegionInfo.acc_deviceptr_nodes = acc_deviceptr_nodes;
+
+		sDRegionInfo.acc_dregion_pcreate = acc_dregion_pcreate;		
+		sDRegionInfo.acc_dregion_pcopy = acc_dregion_pcopy;		
+		sDRegionInfo.acc_dregion_pcopyin = acc_dregion_pcopyin;		
+		sDRegionInfo.acc_dregion_pcopyout = acc_dregion_pcopyout;		
+		sDRegionInfo.acc_dregion_present = acc_dregion_present;		
+		sDRegionInfo.acc_dregion_private = acc_dregion_private;		
+		sDRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;
+		
 	    sDRegionInfo.wn_cont_nodes = wn_cont_nodes;
 	    sDRegionInfo.wn_stmt_block = wn_stmt_block;
 		
@@ -7971,6 +8005,17 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
 		acc_present_or_copyout_nodes = NULL;
 		acc_present_or_create_nodes = NULL;
 		acc_deviceptr_nodes = NULL;
+		
+		acc_dregion_pcreate.clear();
+		acc_dregion_pcopy.clear();
+		acc_dregion_pcopyin.clear();
+		acc_dregion_pcopyout.clear();
+		acc_dregion_present.clear();
+		acc_dregion_host.clear();
+		acc_dregion_device.clear();
+		acc_dregion_private.clear();
+		acc_dregion_fprivate.clear();
+		
 		wn_replace_block = ACC_Process_DataRegion(wn_stmt_block);
   		acc_nested_dregion_info.DRegionInfo.pop_back();
 		acc_nested_dregion_info.Depth --;
@@ -8030,11 +8075,12 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
     return (return_nodes);
 }
 
-static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l, 
+static ST* ACC_GenSingleCreateAndMallocDeviceMem(ACC_DREGION__ENTRY dEntry, 
 						vector<ACC_DATA_ST_MAP*>* pDMap, WN* ReplacementBlock)
 {
-	ST *old_st = WN_st(l);
-	WN_OFFSET old_offset = WN_offsetx(l);		
+	WN* dclause = dEntry.acc_data_clauses;
+	ST *old_st = WN_st(dclause);
+	WN_OFFSET old_offset = WN_offsetx(dclause);		
     TY_IDX ty = ST_type(old_st);
     TY_KIND kind = TY_kind(ty);//ST_name(old_st)
     char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
@@ -8050,8 +8096,8 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l,
 		TY_IDX ty_p = Make_Pointer_Type(etype);
 		ST *karg = NULL;
 		WN *device_addr = NULL;
-		WN* wnSize = ACC_GetArraySize(l);
-		WN* wnStart = ACC_GetArrayStart(l);
+		WN* wnSize = ACC_GetArraySize(dEntry);
+		WN* wnStart = ACC_GetArrayStart(dEntry);
 		ACC_DATA_ST_MAP* pSTMap = new ACC_DATA_ST_MAP;
 		karg = New_ST( CURRENT_SYMTAB );
 		ST_Init(karg,
@@ -8066,45 +8112,9 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l,
 		pSTMap->wnSize = wnSize;
 		pSTMap->wnStart = wnStart;
 		pDMap->push_back(pSTMap);
-		/*{
-			WN * wn;
-			WN* wnx;
-			char strname[256];
-			wn = WN_Create(OPC_VCALL, 4);	
-			WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_PRINTF_DBG);
-		  
-			WN_Set_Call_Non_Data_Mod(wn);
-			WN_Set_Call_Non_Data_Ref(wn);
-			WN_Set_Call_Non_Parm_Mod(wn);
-			WN_Set_Call_Non_Parm_Ref(wn);
-			WN_Set_Call_Parm_Ref(wn);
-			sprintf(strname, "%s host address: 0x%%x, %s address: 0x", ST_name(old_st), ST_name(karg));
-			strcat(strname, "%x; Size: 0x%x\n");
-		    //char* info_out = "verify address: %x";
-			WN* wn_info_out = WN_LdaString(strname,0, strlen(strname)+1);
-			
-		    WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wn_info_out, 
-		                       WN_ty(wn_info_out), WN_PARM_BY_VALUE);
-			if(TY_kind(ty) == KIND_ARRAY)
-				wnx = WN_Lda( Pointer_type, 0, old_st);
-			else
-				wnx = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));	
-		    WN_kid(wn, 1) = WN_CreateParm(Pointer_type, wnx, 
-		                       WN_ty(wnx), WN_PARM_BY_VALUE);	
-			
-			wnx = WN_Lda( Pointer_type, 0, karg);
-		    WN_kid(wn, 2) = WN_CreateParm(Pointer_type, wnx, 
-		                       WN_ty(wnx), WN_PARM_BY_REFERENCE);
-			WN_kid(wn, 3) = WN_CreateParm(MTYPE_U4, WN_COPY_Tree(wnSize), 
-		  				Be_Type_Tbl(MTYPE_U4), WN_PARM_BY_VALUE);
-			WN_INSERT_BlockLast(ReplacementBlock, wn);
-		}*/
 		WN* WN_mallocall = Gen_DeviceMalloc(old_st, karg, WN_COPY_Tree(wnSize));
 		WN_INSERT_BlockLast(ReplacementBlock, WN_mallocall);
 		return karg;
-		//return WN_mallocall;
-		//Gen_DataH2D(old_st, karg, isize);
-		//device_addr = WN_Lda( Pointer_type, 0, karg);
 	}
 	else 
 		Fail_FmtAssertion (
@@ -8112,12 +8122,12 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l,
 	return NULL;
 }
 
-static WN* ACC_GenIsPCreate(WN* node)
+static WN* ACC_GenIsPCreate(ACC_DREGION__ENTRY dEntry)
 {
-	WN* wnSize = ACC_GetArraySize(node);	
-	WN* wnSizeInUnit = ACC_GetArraySizeInUnit(node);
-	WN* wnStart = ACC_GetArrayStart(node);
-	ST *old_st = WN_st(node);
+	WN* wnSize = ACC_GetArraySize(dEntry);	
+	WN* wnSizeInUnit = ACC_GetArraySizeInUnit(dEntry);
+	WN* wnStart = ACC_GetArrayStart(dEntry);
+	ST *old_st = WN_st(dEntry.acc_data_clauses);
 	WN* wnAddr;
 	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
 		wnAddr = WN_Lda( Pointer_type, 0, old_st);
@@ -8146,7 +8156,7 @@ static WN* ACC_GenIsPCreate(WN* node)
 	
 	return wn;
 }
-
+/*
 static WN* ACC_GenIsPCopy(WN* node)
 {
 	WN* wnSize = ACC_GetArraySize(node);
@@ -8245,12 +8255,13 @@ static WN* ACC_GenIsPCopyOut(WN* node)
 	WN_kid(wn, 2) = WN_CreateParm(MTYPE_I4, wnSize, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
 	
 	return wn;
-}
+}*/
 
 //ACCR_GET_DEVICE_ADDR
-static ST* ACC_GenDeclareSingleDeviceMem(WN* l, 
+static ST* ACC_GenDeclareSingleDeviceMem(ACC_DREGION__ENTRY dentry, 
 						vector<ACC_DATA_ST_MAP*>* pDMap)
 {
+	WN* l = dentry.acc_data_clauses;
 	ST *old_st = WN_st(l);
 	WN_OFFSET old_offset = WN_offsetx(l);		
     TY_IDX ty = ST_type(old_st);
@@ -8268,8 +8279,8 @@ static ST* ACC_GenDeclareSingleDeviceMem(WN* l,
 		TY_IDX ty_p = Make_Pointer_Type(etype);
 		ST *karg = NULL;
 		WN *device_addr = NULL;
-		WN* wnSize = ACC_GetArraySize(l);
-		WN* wnStart = ACC_GetArrayStart(l);
+		WN* wnSize = ACC_GetArraySize(dentry);
+		WN* wnStart = ACC_GetArrayStart(dentry);
 		ACC_DATA_ST_MAP* pSTMap = new ACC_DATA_ST_MAP;
 		karg = New_ST( CURRENT_SYMTAB );
 		ST_Init(karg,
@@ -8296,11 +8307,11 @@ static ST* ACC_GenDeclareSingleDeviceMem(WN* l,
 }
 
 
-static WN* ACC_Gen_GetDeviceAddr(WN* node, ST* st_device)
+static WN* ACC_Gen_GetDeviceAddr(ACC_DREGION__ENTRY dentry, ST* st_device)
 {
-	WN* wnSize = ACC_GetArraySize(node);
-	WN* wnStart = ACC_GetArrayStart(node);
-	ST *old_st = WN_st(node);
+	WN* wnSize = ACC_GetArraySize(dentry);
+	WN* wnStart = ACC_GetArrayStart(dentry);
+	ST *old_st = WN_st(dentry.acc_data_clauses);
 	
 	WN* wnAddr;
 	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
@@ -8333,19 +8344,35 @@ static WN* ACC_Gen_GetDeviceAddr(WN* node, ST* st_device)
 	return wn;
 }
 
-static void ACC_GenPresentNode(WN* nodes, vector<ACC_DATA_ST_MAP*>* pDMap, 
+static void ACC_GenPresentNode(vector<ACC_DREGION__ENTRY>* pDREntries, vector<ACC_DATA_ST_MAP*>* pDMap, 
 								WN* ReplacementBlock)
 {
-	WN* l;		
-	for (l = nodes; l; l = WN_next(l)) 
+	//WN* l;	
+	WN* dClause;
+	WN* wnLength;
+	int i=0;
+	if(!is_pcreate_tmp_created)
+	{
+		ACC_Host_Create_Preg_or_Temp( MTYPE_I4, "_is_pcreate",
+	                  &st_is_pcreate, &ofst_st_is_pcreate);
+		is_pcreate_tmp_created = TRUE;
+	}
+	
+	//////////////////////////////////////
+	for (i=0; i<pDREntries->size(); i++) 
+	//for (l = nodes; l; l = WN_next(l)) 
 	{	  
-	  WN* wnSize = ACC_GetArraySize(l);
-	  WN* wnStart = ACC_GetArrayStart(l);
-	  ST *old_st = WN_st(l);
-	  WN_OFFSET old_offset = WN_offsetx(l);
-	  ST* st_device = ACC_GenDeclareSingleDeviceMem(l, pDMap);
+	  ACC_DREGION__ENTRY dentry = (*pDREntries)[i];
+	  dClause = dentry.acc_data_clauses;
+	  wnLength = dentry.acc_data_length;
+	  
+	  WN* wnSize = ACC_GetArraySize(dentry);
+	  WN* wnStart = ACC_GetArrayStart(dentry);
+	  ST *old_st = WN_st(dClause);
+	  WN_OFFSET old_offset = WN_offsetx(dClause);
+	  ST* st_device = ACC_GenDeclareSingleDeviceMem(dentry, pDMap);
 
-	  WN* wn_gen_device_addr = ACC_Gen_GetDeviceAddr(l, st_device);
+	  WN* wn_gen_device_addr = ACC_Gen_GetDeviceAddr(dentry, st_device);
 	  WN_INSERT_BlockLast(ReplacementBlock, wn_gen_device_addr);
 	}
 }
@@ -8369,10 +8396,13 @@ static void ACC_GenDevicePtr(WN* nodes, vector<ST*>* pDMap)
 
 //for create and copyout, MemIn should be false.
 //for copy and copyin, MemIn should be true.
-static void ACC_GenDeviceCreateCopyInOut(WN* nodes, vector<ACC_DATA_ST_MAP*>* pDMap, 
+static void ACC_GenDeviceCreateCopyInOut(vector<ACC_DREGION__ENTRY>* pDREntries, 
+								vector<ACC_DATA_ST_MAP*>* pDMap, 
 								WN* ReplacementBlock, BOOL MemIn)
 {
-	WN* l;	
+	WN* dClause;
+	WN* wnLength;
+	int i=0;
 	if(!is_pcreate_tmp_created)
 	{
 		ACC_Host_Create_Preg_or_Temp( MTYPE_I4, "_is_pcreate",
@@ -8380,18 +8410,22 @@ static void ACC_GenDeviceCreateCopyInOut(WN* nodes, vector<ACC_DATA_ST_MAP*>* pD
 		is_pcreate_tmp_created = TRUE;
 	}
 	
-	
-	for (l = nodes; l; l = WN_next(l)) 
-	{	  
-	  WN* wnSize = ACC_GetArraySize(l);
-	  WN* wnStart = ACC_GetArrayStart(l);
-	  ST *old_st = WN_st(l);
-	  WN_OFFSET old_offset = WN_offsetx(l);
+	//////////////////////////////////////
+	for (i=0; i<pDREntries->size(); i++) 
+	{
+	  ACC_DREGION__ENTRY dentry = (*pDREntries)[i];
+	  dClause = dentry.acc_data_clauses;
+	  wnLength = dentry.acc_data_length;
+	  
+	  WN* wnSize = ACC_GetArraySize(dentry);
+	  WN* wnStart = ACC_GetArrayStart(dentry);
+	  ST *old_st = WN_st(dClause);
+	  WN_OFFSET old_offset = WN_offsetx(dClause);
  	  WN* thenblock = WN_CreateBlock();
  	  WN* elseblock = WN_CreateBlock();
 	  PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
 	  //call is present function to check whether it has already been created.
-      WN_INSERT_BlockLast( ReplacementBlock, ACC_GenIsPCreate(l));
+      WN_INSERT_BlockLast( ReplacementBlock, ACC_GenIsPCreate(dentry));
       ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
       WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_is_pcreate)), rreg1, Return_Val_Preg, ST_type(st_is_pcreate));
       WN* temp_node = WN_Stid(TY_mtype(ST_type(st_is_pcreate)), 0, 
@@ -8404,7 +8438,7 @@ static void ACC_GenDeviceCreateCopyInOut(WN* nodes, vector<ACC_DATA_ST_MAP*>* pD
 	  temp_node = WN_Ldid(TY_mtype(ST_type(st_is_pcreate)), 0, st_is_pcreate, ST_type(st_is_pcreate));	  	
 	  WN* test = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_is_pcreate)), 
 	  								temp_node, WN_Intconst(MTYPE_I4, 0));
-	  ST* st_dMem = ACC_GenSingleCreateAndMallocDeviceMem(l, pDMap, thenblock);
+	  ST* st_dMem = ACC_GenSingleCreateAndMallocDeviceMem(dentry, pDMap, thenblock);
 	  if(MemIn)
 	  {
 	  	WN* wn_h2d = Gen_DataH2D(old_st, st_dMem, WN_COPY_Tree(wnSize), WN_COPY_Tree(wnStart));
@@ -8676,15 +8710,26 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;*/
+		 case WN_PRAGMA_ACC_CLAUSE_DATA_LENGTH:
+		 	continue;
 		   
 		 case WN_PRAGMA_ACC_CLAUSE_PRESENT:
 		   for (wn = acc_present_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+			 //the next node  must be node data length
+		 //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+			 
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_present.push_back(entry);
+			 /////////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_present_nodes;
 			 acc_present_nodes = wn_cur_node;
-			 ++acc_present_count;
+			 //++acc_present_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8694,10 +8739,19 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_present_or_copy_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+			 //the next node  must be node data length
+		 //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_pcopy.push_back(entry);
+			 ///////////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_present_or_copy_nodes;
 			 acc_present_or_copy_nodes = wn_cur_node;
-			 ++acc_present_or_copy_count;
+			 //++acc_present_or_copy_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8707,10 +8761,19 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_present_or_copyin_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+			 //the next node  must be node data length
+		 //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_pcopyin.push_back(entry);
+			 ///////////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_present_or_copyin_nodes;
 			 acc_present_or_copyin_nodes = wn_cur_node;
-			 ++acc_present_or_copyin_count;
+			 //++acc_present_or_copyin_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8720,10 +8783,19 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_present_or_copyout_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+			 //the next node  must be node data length
+		 //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_pcopyout.push_back(entry);
+			 ///////////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_present_or_copyout_nodes;
 			 acc_present_or_copyout_nodes = wn_cur_node;
-			 ++acc_present_or_copyout_count;
+			 //++acc_present_or_copyout_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8732,7 +8804,16 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_host_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   		break;
+		   //the next node  must be node data length
+		   //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_host.push_back(entry);
+			 ///////////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_host_nodes;
 			 acc_host_nodes = wn_cur_node;
 		   } else
@@ -8743,7 +8824,15 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_device_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   		break;
+		   //the next node  must be node data length
+		   //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_device.push_back(entry);
 			 WN_next(wn_cur_node) = acc_device_nodes;
 			 acc_device_nodes = wn_cur_node;
 		   } else
@@ -8755,10 +8844,19 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_present_or_create_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+			 //the next node  must be node data length
+		 //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_pcreate.push_back(entry);
+			 //////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_present_or_create_nodes;
 			 acc_present_or_create_nodes = wn_cur_node;
-			 ++acc_present_or_create_count;
+			 //++acc_present_or_create_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8770,7 +8868,7 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   if (wn == NULL) {
 			 WN_next(wn_cur_node) = acc_deviceptr_nodes;
 			 acc_deviceptr_nodes = wn_cur_node;
-			 ++acc_deviceptr_count;
+			 //++acc_deviceptr_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8779,10 +8877,19 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_private_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+		   //the next node  must be node data length
+		   //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_private.push_back(entry);
+			 //////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_private_nodes;
 			 acc_private_nodes = wn_cur_node;
-			 ++acc_private_count;
+			 //++acc_private_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8791,10 +8898,19 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   for (wn = acc_firstprivate_nodes; wn; wn = WN_next(wn))
 			 if (ACC_Identical_Pragmas(wn_cur_node, wn))
 		   break;
+		   //the next node  must be node data length
+		   //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+		   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+		   
 		   if (wn == NULL) {
+		   	 ACC_DREGION__ENTRY entry;
+			 entry.acc_data_clauses = wn_cur_node;
+			 entry.acc_data_length = acc_dlength_node;
+			 acc_dregion_fprivate.push_back(entry);
+			 //////////////////////////////////////
 			 WN_next(wn_cur_node) = acc_firstprivate_nodes;
 			 acc_firstprivate_nodes = wn_cur_node;
-			 ++acc_firstprivate_count;
+			 //++acc_firstprivate_count;
 		   } else
 			 WN_Delete ( wn_cur_node );
 		   break;
@@ -8834,7 +8950,7 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 		   {
 			 WN_next(wn_cur_node) = acc_parms_nodes;
 			 acc_parms_nodes = wn_cur_node;
-			 ++acc_parms_count;
+			 //++acc_parms_count;
 		   } 
 		   else
 			 WN_Delete ( wn_cur_node );
@@ -9377,6 +9493,14 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	kernelsRegionInfo.acc_async = acc_async_nodes;
 	kernelsRegionInfo.acc_param = acc_parms_nodes;
 
+	kernelsRegionInfo.acc_dregion_pcreate = acc_dregion_pcreate;		
+	kernelsRegionInfo.acc_dregion_pcopy = acc_dregion_pcopy;		
+	kernelsRegionInfo.acc_dregion_pcopyin = acc_dregion_pcopyin;		
+	kernelsRegionInfo.acc_dregion_pcopyout = acc_dregion_pcopyout;		
+	kernelsRegionInfo.acc_dregion_present = acc_dregion_present;
+	kernelsRegionInfo.acc_dregion_private = acc_dregion_private;		
+	kernelsRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;
+
 	//async expr
 	if(acc_async_nodes)
 	{		
@@ -9387,35 +9511,35 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	if(acc_present_or_copy_nodes)
 	{
 		//declaration, cuda malloc 
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_copy_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&kernelsRegionInfo.acc_dregion_pcopy, 
   										&kernelsRegionInfo.pcopyMap, 
   										kernelsBlock, TRUE);
 	}
 	if(acc_present_or_copyin_nodes)
 	{
 		//declaration, cuda malloc 
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_copyin_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&kernelsRegionInfo.acc_dregion_pcopyin, 
   										&kernelsRegionInfo.pcopyinMap, 
   										kernelsBlock, TRUE);
 	}
 	if(acc_present_or_copyout_nodes)
 	{
 		//Only declaration and cuda malloc, no data movement
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_copyout_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&kernelsRegionInfo.acc_dregion_pcopyout, 
   										&kernelsRegionInfo.pcopyoutMap, 
   										kernelsBlock, FALSE);
 	}
 	if(acc_present_or_create_nodes)
 	{
 		//Only declaration and cuda malloc, no data movement
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_create_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&kernelsRegionInfo.acc_dregion_pcreate, 
   										&kernelsRegionInfo.pcreateMap, 
   										kernelsBlock, FALSE);
 	}
 	if(acc_present_nodes)
 	{
 		//Only declaration and cuda malloc, no data movement
-		ACC_GenPresentNode(acc_present_nodes, 
+		ACC_GenPresentNode(&kernelsRegionInfo.acc_dregion_present, 
   										&kernelsRegionInfo.presentMap, 
   										kernelsBlock);
 	}
@@ -9439,6 +9563,16 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	acc_present_or_create_nodes = NULL;
 	acc_deviceptr_nodes = NULL;
 	acc_async_nodes = NULL;
+			  
+	acc_dregion_pcreate.clear();
+	acc_dregion_pcopy.clear();
+	acc_dregion_pcopyin.clear();
+	acc_dregion_pcopyout.clear();
+	acc_dregion_present.clear();
+	acc_dregion_host.clear();
+	acc_dregion_device.clear();
+	acc_dregion_private.clear();
+	acc_dregion_fprivate.clear();
 	//Handling the data analysis	
 	
 		  	  //Generating kernel parameter lists from in/out chain
@@ -9697,6 +9831,14 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	parallelRegionInfo.acc_vector_length = acc_vector_length_node;
 	parallelRegionInfo.acc_reduction = acc_reduction_nodes;
 
+	parallelRegionInfo.acc_dregion_pcreate = acc_dregion_pcreate;		
+	parallelRegionInfo.acc_dregion_pcopy = acc_dregion_pcopy;		
+	parallelRegionInfo.acc_dregion_pcopyin = acc_dregion_pcopyin;		
+	parallelRegionInfo.acc_dregion_pcopyout = acc_dregion_pcopyout;		
+	parallelRegionInfo.acc_dregion_present = acc_dregion_present;
+	parallelRegionInfo.acc_dregion_private = acc_dregion_private;		
+	parallelRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;
+
 	//async expr
 	if(acc_async_nodes)
 	{		
@@ -9707,35 +9849,35 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	if(acc_present_or_copy_nodes)
 	{
 		//declaration, cuda malloc 
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_copy_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&parallelRegionInfo.acc_dregion_pcopy, 
   										&parallelRegionInfo.pcopyMap, 
   										parallelBlock, TRUE);
 	}
 	if(acc_present_or_copyin_nodes)
 	{
 		//declaration, cuda malloc 
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_copyin_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&parallelRegionInfo.acc_dregion_pcopyin, 
   										&parallelRegionInfo.pcopyinMap, 
   										parallelBlock, TRUE);
 	}
 	if(acc_present_or_copyout_nodes)
 	{
 		//Only declaration and cuda malloc, no data movement
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_copyout_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&parallelRegionInfo.acc_dregion_pcopyout, 
   										&parallelRegionInfo.pcopyoutMap, 
   										parallelBlock, FALSE);
 	}
 	if(acc_present_or_create_nodes)
 	{
 		//Only declaration and cuda malloc, no data movement
-		ACC_GenDeviceCreateCopyInOut(acc_present_or_create_nodes, 
+		ACC_GenDeviceCreateCopyInOut(&parallelRegionInfo.acc_dregion_pcreate, 
   										&parallelRegionInfo.pcreateMap, 
   										parallelBlock, FALSE);
 	}
 	if(acc_present_nodes)
 	{
 		//Only declaration and cuda malloc, no data movement
-		ACC_GenPresentNode(acc_present_nodes, 
+		ACC_GenPresentNode(&parallelRegionInfo.acc_dregion_present, 
   										&parallelRegionInfo.presentMap, 
   										parallelBlock);
 	}
@@ -9759,6 +9901,17 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	acc_present_or_create_nodes = NULL;
 	acc_deviceptr_nodes = NULL;
 	acc_async_nodes = NULL;
+	
+			  
+	acc_dregion_pcreate.clear();
+	acc_dregion_pcopy.clear();
+	acc_dregion_pcopyin.clear();
+	acc_dregion_pcopyout.clear();
+	acc_dregion_present.clear();
+	acc_dregion_host.clear();
+	acc_dregion_device.clear();
+	acc_dregion_private.clear();
+	acc_dregion_fprivate.clear();
 	
 	//Generating kernel parameter lists from in/out chain
 	ACC_Region_DefUseAnalysis(tree, &acc_pHeadLiveness, &parallelRegionInfo, FALSE);
@@ -9835,8 +9988,12 @@ static WN* ACC_Process_WaitRegion( WN * tree )
 
 static WN* ACC_Process_UpdateRegion( WN * tree )
 {
-	WN* l;
+	int i;
 	WN* wn_updateBlock = WN_CreateBlock();
+	WN* dClause;
+	WN* wnLength;
+	
+	ACC_DREGION__ENTRY dentry;
 	//async expr
 	if(acc_async_nodes)
 	{		
@@ -9844,23 +10001,29 @@ static WN* ACC_Process_UpdateRegion( WN * tree )
 		WN_Delete(acc_async_nodes); 
 		acc_async_nodes = NULL;
 	}
-	
-	for (l = acc_host_nodes; l; l = WN_next(l)) 
-	{	  
-	  WN* wnSize = ACC_GetArraySize(l);
-	  WN* wnStart = ACC_GetArrayStart(l);
-	  ST *old_st = WN_st(l);
-	  WN_OFFSET old_offset = WN_offsetx(l);
+	for (i=0; i<acc_dregion_host.size(); i++) 
+	{
+	  ACC_DREGION__ENTRY dentry = acc_dregion_host[i];
+	  dClause = dentry.acc_data_clauses;
+	  wnLength = dentry.acc_data_length;
+	  
+	  WN* wnSize = ACC_GetArraySize(dentry);
+	  WN* wnStart = ACC_GetArrayStart(dentry);
+	  ST *old_st = WN_st(dClause);
+	  WN_OFFSET old_offset = WN_offsetx(dClause);
 	  WN_INSERT_BlockLast(wn_updateBlock, 
 	  			ACC_GenUpdateHostVar(old_st, wnStart, wnSize));
 	}
 	
-	for (l = acc_device_nodes; l; l = WN_next(l)) 
+	for (i=0; i<acc_dregion_device.size(); i++)  
 	{	  
-	  WN* wnSize = ACC_GetArraySize(l);
-	  WN* wnStart = ACC_GetArrayStart(l);
-	  ST *old_st = WN_st(l);
-	  WN_OFFSET old_offset = WN_offsetx(l);
+	  ACC_DREGION__ENTRY dentry = acc_dregion_device[i];
+	  dClause = dentry.acc_data_clauses;
+	  wnLength = dentry.acc_data_length;
+	  WN* wnSize = ACC_GetArraySize(dentry);
+	  WN* wnStart = ACC_GetArrayStart(dentry);
+	  ST *old_st = WN_st(dClause);
+	  WN_OFFSET old_offset = WN_offsetx(dClause);
 	  WN_INSERT_BlockLast(wn_updateBlock, 
 	  			ACC_GenUpdateDeviceVar(old_st, wnStart, wnSize));
 	}
@@ -9869,20 +10032,21 @@ static WN* ACC_Process_UpdateRegion( WN * tree )
 		WN_Delete(acc_AsyncExpr);
 	acc_AsyncExpr = NULL;
 	
-    while (acc_host_nodes) 
+    for (i=0; i<acc_dregion_host.size(); i++) 
 	{
-	    l = WN_next(acc_host_nodes);
-	    WN_Delete ( acc_host_nodes );
-	    acc_host_nodes = l;
+	    ACC_DREGION__ENTRY dentry = acc_dregion_host[i];
+	    WN_Delete (dentry.acc_data_clauses);
+	    WN_Delete (dentry.acc_data_length);
     }
 	
-    while (acc_device_nodes) 
+    for (i=0; i<acc_dregion_device.size(); i++) 
 	{
-	    l = WN_next(acc_device_nodes);
-	    WN_Delete ( acc_device_nodes );
-	    acc_device_nodes = l;
+	    ACC_DREGION__ENTRY dentry = acc_dregion_device[i];
+	    WN_Delete ( dentry.acc_data_clauses );
+	    WN_Delete ( dentry.acc_data_length );
     }
-
+	acc_dregion_host.clear();
+	acc_dregion_device.clear();
 	if(acc_if_node)
 	{
 		WN_Delete(acc_if_node);
@@ -9923,19 +10087,19 @@ static WN* ACC_Process_DataRegion( WN * tree )
   					acc_nested_dregion_info.DRegionInfo[acc_nested_dregion_info.Depth - 1];
   
   if(sDRegionInfo.acc_present_or_copyin_nodes)
-  	ACC_GenDeviceCreateCopyInOut(sDRegionInfo.acc_present_or_copyin_nodes, 
+  	ACC_GenDeviceCreateCopyInOut(&sDRegionInfo.acc_dregion_pcopyin, 
   										&sDRegionInfo.pcopyinMap, DRegion_replacement_block, TRUE);
   if(sDRegionInfo.acc_present_or_copyout_nodes)
-  	ACC_GenDeviceCreateCopyInOut(sDRegionInfo.acc_present_or_copyout_nodes,
+  	ACC_GenDeviceCreateCopyInOut(&sDRegionInfo.acc_dregion_pcopyout,
   										&sDRegionInfo.pcopyoutMap, DRegion_replacement_block, FALSE);
   if(sDRegionInfo.acc_present_or_copy_nodes)
-  	ACC_GenDeviceCreateCopyInOut(sDRegionInfo.acc_present_or_copy_nodes,
+  	ACC_GenDeviceCreateCopyInOut(&sDRegionInfo.acc_dregion_pcopy,
   										&sDRegionInfo.pcopyMap, DRegion_replacement_block, TRUE);
   if(sDRegionInfo.acc_present_or_create_nodes)
-  	ACC_GenDeviceCreateCopyInOut(sDRegionInfo.acc_present_or_create_nodes,
+  	ACC_GenDeviceCreateCopyInOut(&sDRegionInfo.acc_dregion_pcreate,
   										&sDRegionInfo.pcreateMap, DRegion_replacement_block, FALSE);
   if(sDRegionInfo.acc_present_nodes)
-  	ACC_GenPresentNode(sDRegionInfo.acc_present_nodes,
+  	ACC_GenPresentNode(&sDRegionInfo.acc_dregion_present,
   										&sDRegionInfo.presentMap, DRegion_replacement_block);
   if(sDRegionInfo.acc_deviceptr_nodes)
   	ACC_GenDevicePtr(sDRegionInfo.acc_deviceptr_nodes, &sDRegionInfo.dptrList);
@@ -10024,6 +10188,14 @@ static WN* ACC_Process_DataRegion( WN * tree )
 			  sDRegionInfo.acc_deviceptr_nodes = acc_deviceptr_nodes;
 			  sDRegionInfo.wn_cont_nodes = wn_cont_nodes;
 			  sDRegionInfo.wn_stmt_block = wn_stmt_block;
+
+				sDRegionInfo.acc_dregion_pcreate = acc_dregion_pcreate;		
+				sDRegionInfo.acc_dregion_pcopy = acc_dregion_pcopy;		
+				sDRegionInfo.acc_dregion_pcopyin = acc_dregion_pcopyin;		
+				sDRegionInfo.acc_dregion_pcopyout = acc_dregion_pcopyout;		
+				sDRegionInfo.acc_dregion_present = acc_dregion_present;	
+				sDRegionInfo.acc_dregion_private = acc_dregion_private;		
+				sDRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;
 			  //////////////////////////////////////////////////////////////////////////
 			  //Get def/use 
 		  	  // sDRegionInfo.acc_pHeadLiveness = NULL;
@@ -10048,7 +10220,18 @@ static WN* ACC_Process_DataRegion( WN * tree )
 			  acc_present_or_copyout_nodes = NULL;
 			  acc_present_or_create_nodes = NULL;
 			  acc_deviceptr_nodes = NULL;
+
+			  acc_dregion_pcreate.clear();
+			  acc_dregion_pcopy.clear();
+			  acc_dregion_pcopyin.clear();
+			  acc_dregion_pcopyout.clear();
+			  acc_dregion_present.clear();
+			  acc_dregion_host.clear();
+			  acc_dregion_device.clear();
+			  acc_dregion_private.clear();
+			  acc_dregion_fprivate.clear();
 			  //cotinue process the body
+	
 			  subBlock = ACC_Process_DataRegion(wn_stmt_block);
 			  acc_nested_dregion_info.DRegionInfo.pop_back();
 			  acc_nested_dregion_info.Depth --;
@@ -11185,7 +11368,40 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node)
 
 	return acc_reduction_proc;
 }
+/*
+static BB_NODE* Find_region_start_bb(CFG* cfg)
+{
+	BB_NODE* bb = cfg->First_bb();
+	while(bb && bb->Kind() != BB_REGIONSTART)
+	{
+		bb = bb->Next();
+	}
+	return bb;
+}
 
+void Check_XPragma_stmt_list_wn(CFG* cfg)
+{
+  BB_NODE *bb = Find_region_start_bb(cfg);
+  if(bb == NULL)
+  	return;
+  //STMT_CONTAINER stmt_cont(bb->Firststmt(), bb->Laststmt());
+  STMT_LIST *stmt_list = bb->Stmtlist();
+  STMTREP_ITER stmt_iter(stmt_list);
+  STMTREP  *tmp;
+  FOR_ALL_NODE(tmp, stmt_iter, Init()) {
+    OPERATOR crepOperator, wnOpr = tmp->Opr();
+    CODEREP* crep;
+    if(wnOpr == OPR_XPRAGMA)
+    {
+    	crep = tmp->Rhs();
+    	CODEKIND ckind = crep->Kind();
+    	//crepOperator = crep->Opr();
+    	int test = 1;
+    	test ++;
+    }
+  }
+}
+*/
 static void ACC_Blank()
 {
 }

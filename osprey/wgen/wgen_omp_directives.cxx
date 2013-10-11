@@ -2007,26 +2007,34 @@ static WN* WGEN_expand_acc_data_clause_with_region(WN_PRAGMA_ID pragma_name, gs_
 	ST * st = NULL;
 	WN * wn = NULL;
 	st = Get_ST(var);
+	WN* wnStart;		
+	WN* wnEnd;
     //WGEN_ACC_Set_Cflag(acc_clause_copy);   //set clause flag for check
     wn = WN_CreateXpragma(pragma_name, st, 1);
 	if(start&&end)
 	{
 		//memory pointer or array
-		WN* wnStart = WGEN_Expand_Expr (start); //WN_kid0(wn) 
-		WN* wnEnd = WGEN_Expand_Expr (end); //WN_kid1(wn) 
+		wnStart = WGEN_Expand_Expr (start); //WN_kid0(wn) 
+		wnEnd = WGEN_Expand_Expr (end); //WN_kid1(wn) 
+		
 		//remember, wnStart < wnEnd, during ACC lower, this will be parsed.
-		WN* kid0 = WN_Relational (OPR_LT, MTYPE_I4, wnStart, wnEnd);
-		WN_kid0(wn) = kid0;
+		//WN* kid0 = WN_Relational (OPR_LT, MTYPE_I4, wnStart, wnEnd);
 	}
 	else
 	{
 		//which mean this is an array
-		WN* wnStart = WN_Intconst(MTYPE_I4, 0);		
-		WN* wnEnd = WN_Intconst(MTYPE_I4, 0);
-		WN* kid0 = WN_Relational (OPR_LT, MTYPE_I4, wnStart, wnEnd);
-		WN_kid0(wn) = kid0;
+		wnStart = WN_Intconst(MTYPE_I4, 0);		
+		wnEnd = WN_Intconst(MTYPE_I4, 0);
+		//WN* kid0 = WN_Relational (OPR_LT, MTYPE_I4, wnStart, wnEnd);
 		//WN_kid1(wn) = NULL;
 	}
+    WN* pragmaLength = WN_CreateXpragma(WN_PRAGMA_ACC_CLAUSE_DATA_LENGTH, st, 1);	
+	WN_kid0(wn) = wnStart;
+	WN_kid0(pragmaLength) = wnEnd;
+	WN_next(wn) = pragmaLength;	
+	WN_prev(pragmaLength) = wn;
+    //WN* pragmaStart = WN_CreateXpragma(WN_PRAGMA_ACC_CLAUSE_DATA_START, st, 1);
+  
 	return wn;
 }
 
@@ -2034,7 +2042,6 @@ static void WGEN_process_acc_clause (gs_t clauses, WN * region = 0)
 {
   ST * st = NULL;
   WN * wn = NULL;
-  BOOL non_pod = FALSE;
   switch (gs_acc_clause_code(clauses))
   {
     case GS_ACC_CLAUSE_IF:
@@ -2389,15 +2396,20 @@ static void WGEN_process_acc_clause (gs_t clauses, WN * region = 0)
       DevWarn ("WGEN_process_acc_clause: unhandled OpenACC clause");
   }
 
+  WN* wn_datalength = WN_next(wn);
   if (wn)
   {
     WN_set_pragma_acc(wn);  
     // If an ACC region is provided, insert a "local" pragma on non-pod
     // objects in the pragmas of that region.
-    if (region && non_pod && WN_region_kind(region) == REGION_KIND_ACC)
-      WN_INSERT_BlockLast(WN_region_pragmas(region), wn);
-    else
-      WGEN_Stmt_Append (wn, Get_Srcpos());
+    WGEN_Stmt_Append (wn, Get_Srcpos());
+  }
+  if(wn_datalength)
+  {
+    WN_set_pragma_acc(wn_datalength);  
+    // If an ACC region is provided, insert a "local" pragma on non-pod
+    // objects in the pragmas of that region.
+    WGEN_Stmt_Append (wn_datalength, Get_Srcpos());
   }
 }
 

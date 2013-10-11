@@ -1261,7 +1261,8 @@ COPYPROP::Prop_ivar(CODEREP *x, BB_NODE *curbb, BOOL icopy_phase,
 
   if (! WOPT_Enable_Prop_Ivar) return NULL;
 #ifdef KEY // bug 5804
-  if (Htable()->Phase() != MAINOPT_PHASE && PU_has_mp(Get_Current_PU())) 
+  if ((Htable()->Phase() != MAINOPT_PHASE && PU_has_mp(Get_Current_PU())) 
+  	|| Htable()->Phase() != MAINOPT_PHASE && PU_has_acc(Get_Current_PU())) 
     return NULL;
 #endif
   if (x->Is_ivar_volatile()) return NULL;
