@@ -1101,6 +1101,15 @@ static void Mark_Dos(WN *wn, HASH_TABLE<WN *,BOOL> *htable)
       kid = next;
     }
   } else {
+
+
+    if(WN_opcode(wn) == OPC_REGION && REGION_is_acc(wn) == TRUE
+  	&& WN_opcode(WN_first(WN_region_pragmas(wn))) == OPC_PRAGMA
+  	&& (WN_pragma(WN_first(WN_kid(wn, 1))) == WN_PRAGMA_ACC_PARALLEL_BEGIN
+  		|| WN_pragma(WN_first(WN_kid(wn, 1))) == WN_PRAGMA_ACC_KERNELS_BEGIN))
+	{
+		return;
+	}
     for (INT kidno=0; kidno<WN_kid_count(wn); kidno++) {
       WN *kid = WN_kid(wn,kidno);
       Mark_Dos(kid,htable);
@@ -1234,6 +1243,14 @@ static void Guard_Dos_Rec(WN *wn, HASH_TABLE<WN *,BOOL> *htable)
       }
     }
   }
+  else if(WN_opcode(wn) == OPC_REGION && REGION_is_acc(wn) == TRUE
+  	&& WN_opcode(WN_first(WN_region_pragmas(wn))) == OPC_PRAGMA
+  	&& (WN_pragma(WN_first(WN_kid(wn, 1))) == WN_PRAGMA_ACC_PARALLEL_BEGIN
+  		|| WN_pragma(WN_first(WN_kid(wn, 1))) == WN_PRAGMA_ACC_KERNELS_BEGIN))
+  {
+  	return;
+  }
+  
   if (opcode == OPC_BLOCK) {
     WN *kid = WN_first(wn);
     while (kid) {
