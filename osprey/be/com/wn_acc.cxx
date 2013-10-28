@@ -145,13 +145,15 @@
 #include "config_opt.h"
 #endif
 #include "alias_analyzer.h"
-
+#include <map>
+using namespace std;
 
   
 typedef enum {
 	PAR_FUNC_ACC_NONE = 0,
-	PAR_FUNC_ACC_REGION,
-	PAR_FUNC_ACC_LAST = PAR_FUNC_ACC_REGION
+	PAR_FUNC_ACC_KERNEL,
+	PAR_FUNC_ACC_DEVICE,
+	PAR_FUNC_ACC_LAST = PAR_FUNC_ACC_DEVICE
 } PAR_FUNC_ACC_TYPE;
 
 
@@ -276,7 +278,15 @@ typedef enum {
 	ACCR_WAIT_SOME_OR_ALL_STREAM	= 33,
 	ACCR_SYNCTHREADS				= 34, //this one is only used in kernel functions
 	ACCR_PRINTF_DBG				= 35,
-	ACCRUNTIME_LAST 		= ACCR_PRINTF_DBG
+	ACCR_GET_NUM_GANGS			= 36,
+	ACCR_GET_NUM_WORKERS		= 37,
+	ACCR_GET_NUM_VECTORS		= 38,	
+	ACCR_GET_TOTAL_VECTORS		= 39,	
+	ACCR_GET_TOTAL_GANGS		= 40,
+	ACCR_GET_TOTAL_GANGS_WORKERS = 41,
+	ACCR_CALL_LOCAL_REDUCTION	= 42,
+	ACCR_DYNAMIC_LAUNCH_KERNEL	= 43,
+	ACCRUNTIME_LAST 		= ACCR_DYNAMIC_LAUNCH_KERNEL
 } OACCRUNTIME;
 
 static const char *accr_names [ACCRUNTIME_LAST + 1] = {
@@ -315,7 +325,15 @@ static const char *accr_names [ACCRUNTIME_LAST + 1] = {
   "__accr_update_device_variable",
   "__accr_wait_some_or_all_stream",
   "__syncthreads",
-  "printf"
+  "printf",
+  "__accr_get_num_gangs",
+  "__accr_get_num_workers",
+  "__accr_get_num_vectors",
+  "__accr_get_total_num_vectors",
+  "__accr_get_total_num_gangs",
+  "__accr_get_total_gangs_workers",
+  "__accr_call_local_reduction",
+  "__accr_dynamic_launch_kernel"
 };
 
 
@@ -359,7 +377,15 @@ static ST_IDX accr_sts [ACCRUNTIME_LAST + 1] = {
   ST_IDX_ZERO,	/*ACCR_UPDATE_DEVICE_VARIABLE*/
   ST_IDX_ZERO,	/*ACCR_WAIT_SOME_OR_ALL_STREAM*/
   ST_IDX_ZERO,	/*ACCR_SYNCTHREADS*/
-  ST_IDX_ZERO	/*FOR DEBUG*/
+  ST_IDX_ZERO,	/*FOR DEBUG*/
+  ST_IDX_ZERO,	/*ACCR_GET_NUM_GANGS*/
+  ST_IDX_ZERO,	/*ACCR_GET_NUM_WORKERS*/
+  ST_IDX_ZERO,	/*ACCR_GET_NUM_VECTORS*/
+  ST_IDX_ZERO,  /*ACCR_GET_TOTAL_VECTORS*/
+  ST_IDX_ZERO,   /*ACCR_GET_TOTAL_GANGS*/
+  ST_IDX_ZERO,	/*ACCR_GET_TOTAL_GANGS_WORKERS*/
+  ST_IDX_ZERO,	/*ACCR_CALL_LOCAL_REDUCTION*/
+  ST_IDX_ZERO	/*ACCR_DYNAMIC_LAUNCH_KERNEL*/
 };
 
 
@@ -369,7 +395,7 @@ typedef enum {
   ACC_VAR_COPY        = 2,
   ACC_VAR_COPYIN      = 3,
   ACC_VAR_COPYOUT     = 4,
-  ACC_VAR_GANG_REDUCTION   = 5,  
+  ACC_VAR_REDUCTION   = 5,  
   ACC_VAR_VECTOR_REDUCTION   = 6
 } ACC_VAR_TYPE;
 
@@ -377,20 +403,14 @@ typedef struct {
   ACC_VAR_TYPE   vtype;
   TYPE_ID    mtype;
   BOOL       has_offset;
-  BOOL       is_static_array;
-  BOOL       is_dynamic_array;
-  BOOL       is_last_and_firstprivate;
-  BOOL       is_non_pod;  // C++ object or array of objects
-                          // "pod" stands for "plain old data"
+  
   TY_IDX     ty;
-  WN        *vtree;
-  WN        *vtreex;
+  
   ST        *orig_st;
   WN_OFFSET  orig_offset;
   ST        *new_st;
   WN_OFFSET  new_offset;
   OPERATOR   reduction_opr; /* specified in REDUCTION pragma */
-  OPCODE     reduction_opc; /* computed from reduction_opr and its operands */
 } ACC_VAR_TABLE;
 
 ST_IDX Make_ACCRuntime_ST ( OACCRUNTIME rop );
@@ -409,14 +429,39 @@ typedef enum
 	ACC_GANG_WORKER_VECTOR
 }ACC_LOOP_TYPE;
 
+typedef enum ACC_LOOP_LEVEL
+{
+	ACC_OUTTER_LOOP,
+	ACC_MIDDER_LOOP,
+	ACC_INNER_LOOP
+}ACC_LOOP_LEVEL;
+
 typedef struct
 {
 	ST* hostName;//host reduction ST
-	ST* deviceName; //device memory ST
-	ST* st_Inkernel; //st in the kernel
-	ST* reduction_kenels;
+	ST* deviceName; //device memory ST, allocated in host side
+	ST* st_Inkernel; //st in the kernel. For each reduction, there is a respective st* in the kernel, usually as kernel parameter.
+	ST* reduction_kenels; //an independent kernel carry the final reduction
+	ST* st_private_var; //private var in kernel to store reduction result
+	WN* wn_private_var;
+	ST* st_local_array;//local memory buffer for reduction in the block
 	OPERATOR ReductionOpr; 
+	ACC_LOOP_LEVEL acc_looplevel;
+	ACC_LOOP_LEVEL acc_stmt_location; //where is the reduction stmt
+	ACC_LOOP_TYPE looptype;
+	WN* wn_IndexOpr;
+	WN* wn_assignment2Array; //this is used in kernel
+	WN* wn_initialAssign; //this is used in kernel
+	WN* wn_assignBack2PrivateVar; //this is used in kernel
+	ST* st_num_of_element;
 }ACC_ReductionMap;
+
+typedef struct ACC_Reduction_Item
+{
+	ACC_LOOP_LEVEL acc_looplevel;
+	WN* acc_wn_reduction;
+}ACC_Reduction_Item;
+
 
 //structure for preserve loop info
 typedef struct
@@ -434,7 +479,7 @@ typedef struct
 	BOOL isSeq;
 	WN* acc_private;
 	INT32 private_count;
-	WN* acc_reduction;
+	//vector<ACC_Reduction_Item> acc_reduction;
 	INT32 reduction_count;
 	WN* acc_collapse;
 	WN* acc_loopbody;
@@ -447,7 +492,7 @@ typedef struct
 	ST * acc_newLimit;
 	WN* wn_regionbody;
 	//this is used in parallel region, there may be some redundenccy execution code
-	WN * wn_following_nodes;
+	//WN * wn_following_nodes;
 	//for nonperfect loopnest
 	//for(.....)
 	//{
@@ -504,7 +549,38 @@ typedef struct PARALLEL_LOOP_INFO
 
 ACC_LOOP_INFO acc_loopinfo;
 PARALLEL_LOOP_INFO acc_parallel_loop_info;
+ST* st_shared_array_4parallelRegion = NULL;
+TY_IDX ty_shared_array_in_parallel = 0;
 
+map<TYPE_ID, ST*> acc_global_memory_for_reduction_host;		//used in host side
+map<TYPE_ID, ST*> acc_global_memory_for_reduction_device;	//used in host side
+map<TYPE_ID, ST*> acc_global_memory_for_reduction_param;	//used in kernel parameters
+map<TYPE_ID, ST*> acc_global_memory_for_reduction_block;	//used in a single block
+
+
+map<ST*, ACC_ReductionMap> acc_reduction_tab_map; //ST in Host side
+
+typedef enum ReductionUsingMem
+{
+	ACC_RD_GLOBAL_MEM,
+	ACC_RD_SHARED_MEM
+}ReductionUsingMem;
+
+typedef enum ReductionRolling
+{
+	ACC_RD_ROLLING,
+	ACC_RD_UNROLLING
+}ReductionRolling;
+
+typedef enum ReductionExeMode
+{
+	ACC_RD_LAUNCH_KERNEL,
+	ACC_RD_DYNAMICPARAL_EXE	
+}ReductionExeMode;
+
+ReductionUsingMem acc_reduction_mem;
+ReductionRolling acc_reduction_rolling;
+ReductionExeMode acc_reduction_exemode;
 
 #define WN_ACC_Compare_Trees(x,y)	(WN_Simp_Compare_Trees(x,y))  
 
@@ -584,7 +660,10 @@ static WN* acc_async_nodes;   /* async int expression */
 static WN* acc_clause_intnum;	/*Int expression, it's for integer expression, e.g, in wait pragma*/
 
 //This table is used to localize the ST  which is used in kernel/parallel region.
-static ACC_VAR_TABLE* acc_local_var_table;		//All the data in the kernel function
+//static ACC_VAR_TABLE* acc_local_var_table;		//All the data in the kernel function
+static map<ST*, ACC_VAR_TABLE> acc_local_new_var_map;     //used to replace var st in kernel function
+//static map<ST*, ST*> acc_local_new_var_map;     //used to replace var st in kernel function
+
 //static ACC_VAR_TABLE *acc_copy_var_table;	    	/* Table of variable substitutions */
 //static ACC_VAR_TABLE *acc_copyin_var_table;	    	/* Table of variable substitutions */
 //static ACC_VAR_TABLE *acc_copyout_var_table;	    /* Table of variable substitutions */
@@ -600,9 +679,12 @@ typedef struct acc_reduction_kernels_pair
 	ST* st_kernels_fun;
 	OPERATOR ReductionOpr; 
 	TY_IDX opr_ty; //double, float, int, short, etc. It's scalar variables.
+	ACC_LOOP_TYPE looptype;
 }acc_reduction_kernels_pair;
 
 static vector<acc_reduction_kernels_pair> acc_reduction_kernels_maps;
+static vector<acc_reduction_kernels_pair> acc_reduction_devices_maps; //devices function for reduction
+static map<ST*, ST*> acc_reduction_device_reduction_call;
 
 static ST *acc_reduction_proc;	/* reduction for ACC process */
 static ST *acc_parallel_proc;	/* Extracted parallel/kernels process */
@@ -670,6 +752,24 @@ static ST *glbl_blockDim_z;
 static ST *glbl_gridDim_x;
 static ST *glbl_gridDim_y;
 static ST *glbl_gridDim_z;
+
+WN* threadidx;
+WN* threadidy;
+WN* threadidz;
+
+WN* blockidx;
+WN* blockidy;
+WN* blockidz;
+
+WN* blockdimx;
+WN* blockdimy;
+WN* blockdimz;
+
+WN* griddimx;
+WN* griddimy;
+WN* griddimz;
+	
+
 static WN* acc_wn_reduction_index;
 static WN_MAP_TAB *acc_pmaptab;	/* Parent map table */
 static WN_MAP_TAB *acc_cmaptab;	/* Child map table */
@@ -809,6 +909,7 @@ typedef struct
 }KernelParameter;
 
 vector<KernelParameter> acc_kernelLaunchParamList;
+vector<KernelParameter> acc_additionalKernelLaunchParamList; //main for reduction
 
 static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l, 
 						vector<ACC_DATA_ST_MAP*>* pDMap, WN* ReplacementBlock);
@@ -829,7 +930,15 @@ static WN* ACC_Process_CacheRegion( WN * tree );
 static WN* ACC_Process_DeclareRegion( WN * tree );
 static WN* ACC_Process_DataRegion( WN * tree );
 static WN *LaunchKernel (int index, WN* wn_replace_block, BOOL bParallelRegion);
-static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node);
+static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_map);
+static WN* ACC_LoadDeviceSharedArrayElem(WN* wn_array_offset, ST* st_array);
+static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr);
+static char* ACC_Get_ScalarName_of_Reduction(TYPE_ID typeID);
+static WN* ACC_Gen_Call_Local_Reduction(ST* st_device_func, ST* st_inputdata);
+static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduction_map);
+static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_map);
+static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_map);
+
 
 
 /*
@@ -870,7 +979,7 @@ ACC_Create_Local_VariableTab ( ACC_VAR_TABLE * vtab, ACC_VAR_TYPE vtype, ST* old
 /********************************************************************/
 /**replace the symtable with local symbol table in kernel function**/
 static WN *
-ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stack * lps);
+ACC_Walk_and_Localize (WN * tree);
 
 
 static void 
@@ -922,23 +1031,24 @@ ACC_Device_Create_Preg_or_Temp ( TYPE_ID mtype, const char *name, ST **st,
 	*ofst = 0;
 }
 
-
+static UINT32 acc_reg_tmp_count = 0; 
 static void 
-ACC_Host_Create_Preg_or_Temp ( TYPE_ID mtype, const char *name, ST **st,
-				  WN_OFFSET *ofst )
+ACC_Host_Create_Preg_or_Temp ( TYPE_ID mtype, const char *name, ST **st)
 {
 	ST *new_st;
-  
+	char szTmp[256];
+	sprintf(szTmp, "__acch_temp_%s_%d", name, acc_reg_tmp_count);
+    acc_reg_tmp_count++;
+	
 	new_st = New_ST (CURRENT_SYMTAB);
 	ST_Init (new_st,
-	         Save_Str2 ( "__acch_temp_", name ),
+	         Save_Str (szTmp),
 	         CLASS_VAR,
 	         SCLASS_AUTO,
 	         EXPORT_LOCAL,
 	         MTYPE_To_TY (mtype));
 	Set_ST_is_temp_var ( new_st );
 	*st = new_st;
-	*ofst = 0;
 }
 
 
@@ -1647,7 +1757,7 @@ Gen_DeviceMalloc( ST* st_hmem, ST *st_dmem, WN* wnSize)
 	if(TY_kind(ST_type(st_hmem)) == KIND_ARRAY)
 		wnx = WN_Lda( Pointer_type, 0, st_hmem);
 	else
-  		wnx = WN_Ldid(Pointer_type, 0, st_hmem, Be_Type_Tbl(Pointer_type));	
+  		wnx = WN_Ldid(Pointer_type, 0, st_hmem, ST_type(st_hmem));	
     WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
                        WN_ty(wnx), WN_PARM_BY_VALUE);
 	
@@ -1677,7 +1787,7 @@ Gen_DataD2H (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
   WN_Set_Call_Parm_Ref(wn);
   WN_linenum(wn) = acc_line_number;
 
-  wnx = WN_Ldid(Pointer_type, 0, Src, Be_Type_Tbl(Pointer_type));
+  wnx = WN_Ldid(Pointer_type, 0, Src, ST_type(Src));
 
 
   //WN* multiArrayT; //
@@ -1690,7 +1800,7 @@ Gen_DataD2H (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
 	if(TY_kind(ST_type(Dst)) == KIND_ARRAY)
 		wnx = WN_Lda( Pointer_type, 0, Dst);
 	else
-  		wnx = WN_Ldid(Pointer_type, 0, Dst, Be_Type_Tbl(Pointer_type));
+  		wnx = WN_Ldid(Pointer_type, 0, Dst, ST_type(Dst));
   //if(ACC_Get_Array_TotalDim(wnx) > 1)
   //	wnx = ACC_Load_MultiDimArray_StartAddr(wnx);
   //wnx = WN_Lda( Pointer_type, 0, Dst);
@@ -1733,7 +1843,7 @@ Gen_DataH2D (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
   if(TY_kind(ST_type(Src)) == KIND_ARRAY)
 	  wnx = WN_Lda( Pointer_type, 0, Src);
   else
-  	  wnx = WN_Ldid(Pointer_type, 0, Src, Be_Type_Tbl(Pointer_type));
+  	  wnx = WN_Ldid(Pointer_type, 0, Src, ST_type(Src));
   //WN* multiArrayT;
   //if(ACC_Get_Array_TotalDim(wnx) > 1)
   //	multiArrayT = ACC_Load_MultiDimArray_StartAddr(wnx);
@@ -1743,7 +1853,7 @@ Gen_DataH2D (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
                        WN_ty(wnx), WN_PARM_BY_VALUE);
 
   
-  wnx = WN_Ldid(Pointer_type, 0, Dst, Be_Type_Tbl(Pointer_type));
+  wnx = WN_Ldid(Pointer_type, 0, Dst, ST_type(Dst));
 
   //wnx = WN_Lda( Pointer_type, 0, Dst);
   WN_kid(wn, 1) = WN_CreateParm(Pointer_type, wnx, 
@@ -1900,8 +2010,7 @@ static void Push_Kernel_Parameters(WN* wn_replaceBlock, BOOL bParallel)
 	//WN_Set_Call_IS_KERNEL_LAUNCH(wn);
 	//first copyin, then copyout, then copy, then param pragma
 	//
-	i=0;
-	while(i<acc_kernelLaunchParamList.size())
+	for(i=0; i<acc_kernelLaunchParamList.size(); i++)
 	{
 		ST* hostST = acc_kernelLaunchParamList[i].st_host;
 		//in case of deviceptr, the host st is NULL.
@@ -1936,6 +2045,12 @@ static void Push_Kernel_Parameters(WN* wn_replaceBlock, BOOL bParallel)
 		}
 		else if(kind == KIND_SCALAR)
 		{
+			ST* old_st = acc_kernelLaunchParamList[i].st_host;
+			map<ST*, ACC_ReductionMap>::iterator itor = acc_reduction_tab_map.find(old_st);	
+			//find the symbol in the reduction, then ignore it in the parameters.
+			if(itor != acc_reduction_tab_map.end())
+				continue;
+			//////////////////////////////////////////////////
 			wn = WN_Create(OPC_VCALL, 1);
 			WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_KERNELPARAMPUSH_SCALAR);
 			
@@ -1949,84 +2064,33 @@ static void Push_Kernel_Parameters(WN* wn_replaceBlock, BOOL bParallel)
 	  		//wnx = WN_Ldid(Pointer_type, 0, acc_kernelLaunchParamList[i].st_device, 
 			//					ST_type(acc_kernelLaunchParamList[i].st_device));
 			
-			wnx = WN_Lda( Pointer_type, 0, acc_kernelLaunchParamList[i].st_host);
+			wnx = WN_Lda( Pointer_type, 0, old_st);
 			//First, pointer
 		    WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
 		                       WN_ty(wnx), WN_PARM_BY_REFERENCE);
 			
 			//Attach two the replacement block
 			WN_INSERT_BlockLast(wn_replaceBlock, wn);
-			/*INT64 acc_dtype = 
-					GetKernelParamType(acc_kernelLaunchParamList[i].st_host);
-			if(acc_dtype == ACC_KDATA_INT32 || acc_dtype == ACC_KDATA_UINT32)
-			{				
-				wn = WN_Create(OPC_VCALL, 1 );
-				WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_KERNELPARAMPUSH_INT);
-				
-				WN_Set_Call_Non_Data_Mod(wn);
-				WN_Set_Call_Non_Data_Ref(wn);
-				WN_Set_Call_Non_Parm_Mod(wn);
-				WN_Set_Call_Non_Parm_Ref(wn);
-				WN_Set_Call_Parm_Ref(wn);
-				WN_linenum(wn) = acc_line_number;
-
-				TY_IDX tmp_ty = ST_type(acc_kernelLaunchParamList[i].st_host);    
-		    	TYPE_ID tmp_tid = TY_mtype(tmp_ty);
-				//value
-				WN* param = WN_Ldid(tmp_tid, 0, acc_kernelLaunchParamList[i].st_host, tmp_ty);
-				
-				WN_kid(wn, 0) = WN_CreateParm(tmp_tid, param, tmp_ty, WN_PARM_BY_VALUE);
-				
-				WN_INSERT_BlockLast(wn_replaceBlock, wn);
-			}
-			else if(acc_dtype == ACC_KDATA_DOUBLE)
-			{
-				wn = WN_Create(OPC_VCALL, 1 );
-				WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_KERNELPARAMPUSH_DOUBLE);
-				
-				WN_Set_Call_Non_Data_Mod(wn);
-				WN_Set_Call_Non_Data_Ref(wn);
-				WN_Set_Call_Non_Parm_Mod(wn);
-				WN_Set_Call_Non_Parm_Ref(wn);
-				WN_Set_Call_Parm_Ref(wn);
-				WN_linenum(wn) = acc_line_number;
-
-				TY_IDX tmp_ty = ST_type(acc_kernelLaunchParamList[i].st_host);    
-		    	TYPE_ID tmp_tid = TY_mtype(tmp_ty);
-				//value
-				WN* param = WN_Ldid(tmp_tid, 0, acc_kernelLaunchParamList[i].st_host, tmp_ty);
-				
-				WN_kid(wn, 0) = WN_CreateParm(tmp_tid, param, tmp_ty, WN_PARM_BY_VALUE);
-				WN_INSERT_BlockLast(wn_replaceBlock, wn);
-			}
-			else
-			{
-				Is_True(FALSE, ("Wrong Kernel Parameter scalar type."));
-			}*/
 		}
 		else
 		{
 			Is_True(FALSE, ("Wrong Kernel Parameter Kind Type. in Push_Kernel_Parameters 1"));
 		}
-		
-		i ++;
 	}
 	//launch the reduction parameters
 	i=0;
-	//Only kernel region doing the reduction this way
-	while(!bParallel && (i<acc_loopinfo.acc_forloop[0].reductionmap.size()))
+	//Only parallel region doing the reduction this way
+	for(i=0; (bParallel && (i<acc_additionalKernelLaunchParamList.size())); i++)
 	{
-		ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[i];
+		KernelParameter parmList = acc_additionalKernelLaunchParamList[i];
 		////////////////////////////////////////////////////////////////////////////
-		ST* st_device = reductionmap.deviceName;
+		ST* st_device = parmList.st_device;
 		TY_IDX ty = ST_type(st_device);
 		TY_KIND kind = TY_kind(ty);//ST_name(old_st)
 		TYPE_ID typeID;
 		if(kind == KIND_POINTER || kind == KIND_ARRAY)
-		{		
-			INT64 acc_dtype = 
-					GetKernelParamType(st_device);
-			wn = WN_Create(OPC_VCALL, 2 );
+		{
+			wn = WN_Create(OPC_VCALL, 1 );
 			WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_KERNELPARAMPUSH_POINTER);
 			
 			WN_Set_Call_Non_Data_Mod(wn);
@@ -2040,9 +2104,6 @@ static void Push_Kernel_Parameters(WN* wn_replaceBlock, BOOL bParallel)
 			//First, pointer
 			WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
 							 		WN_ty(wnx), WN_PARM_BY_VALUE);
-			//pointer type: int/short/double/float
-			WN_kid(wn, 1) = WN_CreateParm(MTYPE_I4, WN_Intconst(MTYPE_I4, acc_dtype), 
-			  Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
 			//Attach two the replacement block
 			WN_INSERT_BlockLast(wn_replaceBlock, wn);
 		}
@@ -2050,25 +2111,17 @@ static void Push_Kernel_Parameters(WN* wn_replaceBlock, BOOL bParallel)
 		{
 			Is_True(FALSE, ("Wrong Kernel Parameter Kind Type in Push_Kernel_Parameters 2."));
 		}
-		
-		i ++;
 	}
 }
 
 
 /*****************************************/
 //This function is only called by ACC_Create_MicroTask function.
-static void Create_kernel_parameters_ST(WN* kparamlist)
+static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 {	
 	kernel_param.clear();
-	ACC_VAR_TABLE* v = acc_local_var_table; // = acc_local_var_table;
 	WN* wn;
-
-
-	if(!acc_local_var_table)
-	{
-		Fail_FmtAssertion("acc_local_var_table is NULL!");  	
-	}
+	
 	//kernel_param is used for kernel function parameter generation
 	//The sequence of parameters must be exactly the same 
 	//as the sequence parameters pushed into kernel launch stack
@@ -2077,7 +2130,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist)
 	//	kernel_parameters_count ++;
 	//}.
 	//this var may be deleted later.it is useless.
-	ACC_VAR_TYPE vtype = ACC_VAR_COPYIN;
+	//ACC_VAR_TYPE vtype = ACC_VAR_COPYIN;	
 	WN        *l;
 	/* Do locals */
 	for (l = kparamlist; l; l = WN_next(l)) 
@@ -2087,6 +2140,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist)
 	    TY_IDX ty = ST_type(old_st);
 	    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
 	    char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
+		ST *new_st;
 		sprintf ( localname, "__d_%s", ST_name(old_st) );
 		if (kind == KIND_POINTER)
 		{
@@ -2094,89 +2148,270 @@ static void Create_kernel_parameters_ST(WN* kparamlist)
 			TY_IDX ty_p = Make_Pointer_Type(pty);
 			//in case of 64bit machine, the alignment becomes 8bytes
 			//Set_TY_align(ty_p, 4);
-			ST *karg = NULL;
-			karg = New_ST( CURRENT_SYMTAB );
-			ST_Init(karg,
+			new_st = New_ST( CURRENT_SYMTAB );
+			ST_Init(new_st,
 					Save_Str( localname ),
 					CLASS_VAR,
 					SCLASS_FORMAL,
 					EXPORT_LOCAL,
 					ty_p);
-			Set_ST_is_value_parm( karg );
-			kernel_param.push_back(karg);
-			ACC_Create_Local_VariableTab(v, vtype, old_st, old_offset, karg);
+			Set_ST_is_value_parm( new_st );
+			kernel_param.push_back(new_st);
+			//ACC_Create_Local_VariableTab(v, vtype, old_st, old_offset, karg);
 		}
 		else if (kind == KIND_ARRAY)
 		{
 			TY_IDX etype = ACC_Get_ElementTYForMultiArray(old_st);
 			TY_IDX ty_p = Make_Pointer_Type(etype);
 			//Set_TY_align(ty_p, 4);
-			ST *karg = NULL;
-			karg = New_ST( CURRENT_SYMTAB );
-			ST_Init(karg,
+			new_st = New_ST( CURRENT_SYMTAB );
+			ST_Init(new_st,
 					Save_Str( localname ),
 					CLASS_VAR,
 					SCLASS_FORMAL,
 					EXPORT_LOCAL,
 					ty_p);
-			Set_ST_is_value_parm( karg );
-			kernel_param.push_back(karg);
-			ACC_Create_Local_VariableTab(v, vtype, old_st, old_offset, karg);
+			Set_ST_is_value_parm( new_st );
+			kernel_param.push_back(new_st);
 		}
 		else if (kind == KIND_SCALAR)
 		{
-		    ST *karg = NULL;
-			karg = New_ST( CURRENT_SYMTAB );
-			ST_Init(karg,
+			map<ST*, ACC_ReductionMap>::iterator itor = acc_reduction_tab_map.find(old_st);	
+			//find the symbol in the reduction, then ignore it in the parameters.
+			if(itor != acc_reduction_tab_map.end())
+				continue;
+			new_st = New_ST( CURRENT_SYMTAB );
+			ST_Init(new_st,
 					Save_Str( localname ),
 					CLASS_VAR,
 					SCLASS_FORMAL,
 					EXPORT_LOCAL,
 					ty);
-			Set_ST_is_value_parm( karg );
-			kernel_param.push_back(karg);
-			ACC_Create_Local_VariableTab(v, vtype, old_st, old_offset, karg);
+			Set_ST_is_value_parm( new_st );
+			kernel_param.push_back(new_st);
 		}
-		v ++;
+		ACC_VAR_TABLE var;
+		if(old_offset)
+		{
+			var.has_offset = TRUE;
+			var.orig_offset = old_offset;
+		}
+		else
+			var.has_offset = FALSE;
+		var.orig_st = old_st;
+		var.new_st = new_st;
+		acc_local_new_var_map[old_st] = var;
 	}
 	int i=0;
-	while(acc_loopinfo.loopnum>0 && i<acc_loopinfo.acc_forloop[0].reductionmap.size())
+	//reduction @Parallel region
+	if(isParallel && acc_parallel_loop_info.loopnum>0)
 	{
-		ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[i];
-		////////////////////////////////////////////////////////////////////////////
-		//it is in the caller function ST.
-		ST* st_device = reductionmap.deviceName; 		
-		ST* st_host = reductionmap.hostName;
-		WN_OFFSET old_offset = 0;		
-	    TY_IDX ty = ST_type(st_device);
-	    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
-	    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);		
-		vtype = ACC_VAR_GANG_REDUCTION;
-		
-		sprintf ( localname, "__reduction_%s", ST_name(st_host) );
-		if (kind == KIND_POINTER)
+		UINT32 loopinfoIdx = 0;
+		ACC_LOOP_INFO acc_loopinfo_local;
+		while(loopinfoIdx<acc_parallel_loop_info.loopnum)
 		{
-			TY_IDX pty = TY_pointed(ty);
-			TY_IDX ty_p = Make_Pointer_Type(pty);
-			//Set_TY_align(ty_p, 4);
-			ST *karg = NULL;
-			karg = New_ST( CURRENT_SYMTAB );
-			ST_Init(karg,
-					Save_Str( localname ),
-					CLASS_VAR,
-					SCLASS_FORMAL,
-					EXPORT_LOCAL,
-					ty_p);
-			Set_ST_is_value_parm( karg );
-			kernel_param.push_back(karg);
-			ACC_Create_Local_VariableTab(v, vtype, st_host, old_offset, karg);
-			reductionmap.st_Inkernel = karg;
-			v->reduction_opr = reductionmap.ReductionOpr;
-		}
-		acc_loopinfo.acc_forloop[0].reductionmap[i] = reductionmap;
-		v ++;
-		i ++;
+			acc_loopinfo_local = acc_parallel_loop_info.acc_loopinfo[loopinfoIdx];
+			i = 0;
+			while(i < acc_loopinfo_local.acc_forloop[0].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo_local.acc_forloop[0].reductionmap[i];
+				////////////////////////////////////////////////////////////////////////////
+				//it is in the caller function ST.
+				ST* st_device = reductionmap.deviceName;
+				ST* st_host = reductionmap.hostName;
+
+				ST* st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+				//sprintf ( reduction_localname, "device_%s", ST_name(reductionMap.hostName));
+				ST_Init(st_reduction_private_var, Save_Str2("__device_", ST_name(st_host)), CLASS_VAR, 
+							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+				reductionmap.st_private_var = st_reduction_private_var;
+				reductionmap.wn_private_var = WN_Ldid(TY_mtype(ST_type(st_reduction_private_var)), 
+						0, st_reduction_private_var, ST_type(st_reduction_private_var));
+
+				
+				WN_OFFSET old_offset = 0;		
+			    TY_IDX ty = ST_type(st_device);
+			    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+			    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);	
+				
+				sprintf ( localname, "__reduction_%s", ST_name(st_host) );
+				//if (kind == KIND_POINTER)
+				//{
+				TY_IDX pty = TY_pointed(ty);
+				TY_IDX ty_p = Make_Pointer_Type(pty);
+				//Set_TY_align(ty_p, 4);
+				ST *karg = NULL;
+				karg = New_ST( CURRENT_SYMTAB );
+				ST_Init(karg,
+						Save_Str( localname ),
+						CLASS_VAR,
+						SCLASS_FORMAL,
+						EXPORT_LOCAL,
+						ty_p);
+				Set_ST_is_value_parm( karg );
+				kernel_param.push_back(karg);
+				KernelParameter kernelParameter;
+				kernelParameter.st_host = st_host;
+				kernelParameter.st_device = reductionmap.deviceName;
+				acc_additionalKernelLaunchParamList.push_back(kernelParameter);
+				reductionmap.st_Inkernel = karg;
+				reductionmap.looptype = acc_loopinfo.acc_forloop[0].looptype;
+				//v->reduction_opr = reductionmap.ReductionOpr;
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				//}
+				ACC_VAR_TABLE var;
+				if(old_offset)
+				{
+					var.has_offset = TRUE;
+					var.orig_offset = old_offset;
+				}
+				else
+					var.has_offset = FALSE;
+				var.orig_st = st_host;
+				var.new_st = st_reduction_private_var;
+				acc_local_new_var_map[st_host] = var;
+				acc_loopinfo_local.acc_forloop[0].reductionmap[i] = reductionmap;
+				i ++;
+			}
+			i = 0;
+			while(acc_loopinfo_local.loopnum>1 && i<acc_loopinfo_local.acc_forloop[1].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo_local.acc_forloop[1].reductionmap[i];
+				////////////////////////////////////////////////////////////////////////////
+				//it is in the caller function ST.
+				ST* st_device = reductionmap.deviceName; 		
+				ST* st_host = reductionmap.hostName;
+				TYPE_ID typeID = TY_mtype(ST_type(st_host));
+
+				ST* st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+				//sprintf ( reduction_localname, "device_%s", ST_name(reductionMap.hostName));
+				ST_Init(st_reduction_private_var, Save_Str2("__device_", ST_name(st_host)), CLASS_VAR, 
+							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+				reductionmap.st_private_var = st_reduction_private_var;
+				reductionmap.wn_private_var = WN_Ldid(TY_mtype(ST_type(st_reduction_private_var)), 
+						0, st_reduction_private_var, ST_type(st_reduction_private_var));
+				////////////////////////////////////////////
+				ST* reduction_param = acc_global_memory_for_reduction_param[typeID];
+				if(!reduction_param)
+				{
+					WN_OFFSET old_offset = 0;		
+				    TY_IDX ty = ST_type(st_device);
+				    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+				    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);
+					
+					sprintf ( localname, "__reduction_%s", ST_name(st_host) );
+					//if (kind == KIND_POINTER)
+					//{
+					TY_IDX pty = TY_pointed(ty);
+					TY_IDX ty_p = Make_Pointer_Type(pty);
+					//Set_TY_align(ty_p, 4);
+					ST *karg = NULL;
+					karg = New_ST( CURRENT_SYMTAB );
+					ST_Init(karg,
+							Save_Str( localname ),
+							CLASS_VAR,
+							SCLASS_FORMAL,
+							EXPORT_LOCAL,
+							ty_p);
+					Set_ST_is_value_parm( karg );
+					kernel_param.push_back(karg);
+					KernelParameter kernelParameter;
+					kernelParameter.st_host = st_host;
+					kernelParameter.st_device = reductionmap.deviceName;
+					acc_additionalKernelLaunchParamList.push_back(kernelParameter);
+					acc_global_memory_for_reduction_param[typeID] = karg;
+					reductionmap.st_Inkernel = karg;
+					reductionmap.looptype = acc_loopinfo.acc_forloop[1].looptype;
+					acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+					//}
+				}
+				else
+				{
+					reductionmap.st_Inkernel = reduction_param;
+					reductionmap.looptype = acc_loopinfo.acc_forloop[1].looptype;
+					acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				}
+				
+				ACC_VAR_TABLE var;
+				var.has_offset = FALSE;
+				var.orig_st = st_host;
+				var.new_st = reductionmap.st_private_var;
+				acc_local_new_var_map[st_host] = var;
+				acc_loopinfo_local.acc_forloop[1].reductionmap[i] = reductionmap;
+				i ++;
+			}
+			i = 0;
+			while(acc_loopinfo_local.loopnum==3 && i<acc_loopinfo_local.acc_forloop[2].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo_local.acc_forloop[2].reductionmap[i];
+				////////////////////////////////////////////////////////////////////////////
+				//it is in the caller function ST.
+				ST* st_device = reductionmap.deviceName; 		
+				ST* st_host = reductionmap.hostName;
+				TYPE_ID typeID = TY_mtype(ST_type(st_host));
+
+				ST* st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+				//sprintf ( reduction_localname, "device_%s", ST_name(reductionMap.hostName));
+				ST_Init(st_reduction_private_var, Save_Str2("__device_", ST_name(st_host)), CLASS_VAR, 
+							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+				reductionmap.st_private_var = st_reduction_private_var;
+				reductionmap.wn_private_var = WN_Ldid(TY_mtype(ST_type(st_reduction_private_var)), 
+						0, st_reduction_private_var, ST_type(st_reduction_private_var));
+				////////////////////////////////////////////
+				ST* reduction_param = acc_global_memory_for_reduction_param[typeID];
+				if(!reduction_param)
+				{
+					WN_OFFSET old_offset = 0;		
+				    TY_IDX ty = ST_type(st_device);
+				    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+				    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);	
+					
+					sprintf ( localname, "__reduction_%s", ST_name(st_host) );
+					//if (kind == KIND_POINTER)
+					//{
+					TY_IDX pty = TY_pointed(ty);
+					TY_IDX ty_p = Make_Pointer_Type(pty);
+					//Set_TY_align(ty_p, 4);
+					ST *karg = NULL;
+					karg = New_ST( CURRENT_SYMTAB );
+					ST_Init(karg,
+							Save_Str( localname ),
+							CLASS_VAR,
+							SCLASS_FORMAL,
+							EXPORT_LOCAL,
+							ty_p);
+					Set_ST_is_value_parm( karg );
+					kernel_param.push_back(karg);
+					KernelParameter kernelParameter;
+					kernelParameter.st_host = st_host;
+					kernelParameter.st_device = reductionmap.deviceName;
+					acc_additionalKernelLaunchParamList.push_back(kernelParameter);
+					acc_global_memory_for_reduction_param[typeID] = karg;
+					reductionmap.st_Inkernel = karg;
+					reductionmap.looptype = acc_loopinfo.acc_forloop[2].looptype;
+					acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+					//}
+				}
+				else
+				{
+					reductionmap.st_Inkernel = reduction_param;
+					reductionmap.looptype = acc_loopinfo.acc_forloop[2].looptype;
+					acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				}
+				
+				ACC_VAR_TABLE var;
+				var.has_offset = FALSE;
+				var.orig_st = st_host;
+				var.new_st = reductionmap.st_private_var;
+				acc_local_new_var_map[st_host] = var;
+				acc_loopinfo_local.acc_forloop[2].reductionmap[i] = reductionmap;				
+				i ++;
+			}
+			acc_parallel_loop_info.acc_loopinfo[loopinfoIdx] = acc_loopinfo_local;
+			loopinfoIdx++;
+		}			
 	}
+	//put the reduction in kernel here.
 
 }
 /*
@@ -2190,16 +2425,6 @@ parallel function's symtab becomes CURRENT_SYMTAB.
 static void ACC_Create_MicroTask ( PAR_FUNC_ACC_TYPE func_type, 
 											void* pRInfo, BOOL isParallelRegion)
 {
-  BOOL is_region = FALSE, has_gtid = FALSE;
-  switch (func_type) {  
-  case PAR_FUNC_ACC_REGION:
-    is_region = TRUE;
-    has_gtid = TRUE;
-    break;
-  default:
-    Fail_FmtAssertion("invalid parallel acc function type %d", (INT) func_type);
-    break;
-  }
   KernelsRegionInfo* pKRInfo;
   ParallelRegionInfo* pPRInfo;
   if(isParallelRegion)
@@ -2222,7 +2447,7 @@ static void ACC_Create_MicroTask ( PAR_FUNC_ACC_TYPE func_type,
   acc_construct_num ++;
   // get function prototype
 
-  TY_IDX &func_ty_idx = acc_region_ty;
+  TY_IDX func_ty_idx = TY_IDX_ZERO;
 
   if  (func_ty_idx == TY_IDX_ZERO) 
   {
@@ -2240,14 +2465,8 @@ static void ACC_Create_MicroTask ( PAR_FUNC_ACC_TYPE func_type,
     Set_TY_tylist(ty, parm_idx);
     Set_TYLIST_type(parm_list, Be_Type_Tbl(MTYPE_V));  // return type
 
-      // Two basic parameters
-    if (has_gtid)
-      Set_TYLIST_type(New_TYLIST(parm_idx), Be_Type_Tbl(Pointer_type)); // gtid
     /* turn this off if don't want to use taskargs struct */
     //else if (0)
-
-    Set_TYLIST_type(New_TYLIST(parm_idx), Be_Type_Tbl(Pointer_type)); // btid
-
 
     Set_TYLIST_type(New_TYLIST(parm_idx), TY_IDX_ZERO); // end of parm list
 
@@ -2284,7 +2503,7 @@ is inheriting pu_recursive OK?
   Set_PU_has_acc(pu);
   
 #ifdef KEY
-  Set_PU_acc_lower_generated(pu);
+  //Set_PU_acc_lower_generated(pu);
 #endif // KEY
     // child PU inherits language flags from parent
   if (PU_c_lang(Current_PU_Info_pu()))
@@ -2309,8 +2528,8 @@ is inheriting pu_recursive OK?
           CLASS_FUNC,
           SCLASS_TEXT,
           EXPORT_LOCAL,
-          pu_idx);
-  Set_ST_addr_passed(acc_parallel_proc);
+          TY_IDX(pu_idx));
+  //Set_ST_addr_passed(acc_parallel_proc);
   Set_ST_ACC_kernels_func(acc_parallel_proc);
   Set_ST_sfname_idx(acc_parallel_proc, Save_Str(Src_File_Name));
 
@@ -2348,9 +2567,9 @@ is inheriting pu_recursive OK?
   ST *arg_gtid = NULL;
   ST *task_args = NULL;
   if(isParallelRegion)
-  	Create_kernel_parameters_ST(pPRInfo->acc_param);
+  	Create_kernel_parameters_ST(pPRInfo->acc_param, TRUE);
   else  	
-  	Create_kernel_parameters_ST(pKRInfo->acc_param);
+  	Create_kernel_parameters_ST(pKRInfo->acc_param, FALSE);
   
   //acc_local_taskargs = NULL;
   //More parameters
@@ -2471,7 +2690,7 @@ is inheriting pu_recursive OK?
   
 #endif
   // Currently, don't pass data via arguments.
-  UINT arg_cnt = (has_gtid ? 2 : 1);
+  UINT arg_cnt = 1;
   /* turn this off if don't want to use taskargs struct */
   //if (is_task_region) arg_cnt = 2;
 
@@ -2489,7 +2708,7 @@ is inheriting pu_recursive OK?
   while(ikid < kernel_param.size())
   {
      WN_kid(func_entry, ikid) = WN_CreateIdname ( 0, kernel_param[ikid] );
-	 ACC_Add_DST_variable ( kernel_param[ikid], acc_nested_dst, acc_line_number, DST_INVALID_IDX );
+	 //ACC_Add_DST_variable ( kernel_param[ikid], acc_nested_dst, acc_line_number, DST_INVALID_IDX );
   	 ikid ++;
   }
 
@@ -2890,12 +3109,13 @@ ACC_Extract_Index_Info ( WN* pdo_node )
   }
 }
 
-static WN* GenFinalReductionAlgorithm(ST* st_dbuffer, ST* st_host, ST* st_reduction_kernel_name, UINT32 iDataType)
+static WN* GenFinalReductionAlgorithm(ST* st_dbuffer, ST* st_host, 
+				ST* st_reduction_kernel_name, ST* st_num_of_element, UINT32 iTypesize)
 {
 	//Set_ST_name_idx
 	WN * wn;
 	WN* wnx;
-	wn = WN_Create(OPC_VCALL, 4);	
+	wn = WN_Create(OPC_VCALL, 5);	
 	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_FINAL_REDUCTION_ALGORITHM);
   
 	WN_Set_Call_Non_Data_Mod(wn);
@@ -2918,14 +3138,18 @@ static WN* GenFinalReductionAlgorithm(ST* st_dbuffer, ST* st_host, ST* st_reduct
 	WN_kid(wn, 2) = WN_CreateParm(Pointer_type, wn_kernelname, 
 						 		WN_ty(wn_kernelname), WN_PARM_BY_VALUE);
 	
-    WN_kid(wn, 3) = WN_CreateParm(MTYPE_U4, WN_Intconst(MTYPE_U4, iDataType), 
+  	wnx = WN_Ldid(TY_mtype(ST_type(st_num_of_element)), 0, st_num_of_element, ST_type(st_num_of_element));	
+    WN_kid(wn, 3) = WN_CreateParm(TY_mtype(ST_type(st_num_of_element)), wnx, 
+		  							ST_type(st_num_of_element), WN_PARM_BY_VALUE);
+	
+    WN_kid(wn, 4) = WN_CreateParm(MTYPE_U4, WN_Intconst(MTYPE_U4, iTypesize), 
 		  							Be_Type_Tbl(MTYPE_U4), WN_PARM_BY_VALUE);
 	
   	return wn;
 }
 
 
-static WN* GenReductionMalloc(ST* st_device, INT64 acc_dtype)
+static WN* GenReductionMalloc(ST* st_device, WN* wnSize)
 {
 	WN * wn;
 	WN* wnx;
@@ -2942,13 +3166,12 @@ static WN* GenReductionMalloc(ST* st_device, INT64 acc_dtype)
     WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
                        WN_ty(wnx), WN_PARM_BY_REFERENCE);
   
-	WN_kid(wn, 1) = WN_CreateParm(MTYPE_I4, WN_Intconst(MTYPE_I4, acc_dtype), 
-		  Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
+	WN_kid(wn, 1) = WN_CreateParm(MTYPE_I4, wnSize, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
 	
   	return wn;
 }
 
-static WN* ACC_Process_SingleReductionNode(WN* reductionode, WN* wn_replace_block) 
+/*static WN* ACC_Process_SingleReductionNode(WN* reductionode, WN* wn_replace_block) 
 {
 	//reductionmap	
 	ST *old_st = WN_st(reductionode);
@@ -2992,15 +3215,578 @@ static WN* ACC_Process_SingleReductionNode(WN* reductionode, WN* wn_replace_bloc
 		Fail_FmtAssertion (
       "out of WN kind in ACC_Process_SingleReductionNode(...), Reduction variables should be SCALAR.");
 	return NULL;	
+}*/
+static void ACC_Naive_Reduction(WN* wn_replace_block)
+{	
+}
+
+static void ACC_Optimized_Reduction(WN* wn_replace_block)
+{
+}
+
+
+static void ACC_GlobalMemory_Reduction(WN* wn_replace_block)
+{
+   //Generate some information for reduction algorithm
+   //if(acc_loopinfo.acc_forloop[0].reductionmap.size() != 0)
+   {
+		
+		//ST* st_reduction_idx1 = New_ST( CURRENT_SYMTAB );
+		//char reduction_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
+
+		//ST* st_reduction_idx2 = New_ST( CURRENT_SYMTAB );
+
+		//sprintf ( reduction_idx_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
+		//kernel_tmp_variable_count ++;
+
+
+		//ST_Init(st_reduction_idx2, Save_Str(reduction_idx_localname), CLASS_VAR, 
+		//					SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
+		/////////////////////////////////////////////////////////////////////////////////
+		//For the top level reduction, Index can be catergrized into several types
+		//
+		//for 3 level nested loop
+		//if reduction is in outter body
+		//if reduction is in midder body
+		//if reduction is in inner body
+		if(acc_loopinfo.loopnum == 3)
+		{
+			INT32 RDIdx = 0;
+			while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+			{
+				//WN* reduction_Idx1;
+				//WN* reduction_Idx2;
+				WN* wn_If_stmt_test = NULL;
+				ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+				ST* st_reduction_private_var = reductionMap.st_private_var;
+				
+				if(reductionMap.acc_stmt_location == ACC_OUTTER_LOOP)
+				{
+					reductionMap.wn_IndexOpr = blockidx;
+					//
+					WN* test1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+								WN_COPY_Tree(threadidx), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+					WN* test2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_y)), 
+								WN_COPY_Tree(threadidy), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_y)), 0));
+					wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, test1, test2);
+				}
+				else if(reductionMap.acc_stmt_location == ACC_MIDDER_LOOP)
+				{
+					//Index = (thread.y * gridim.x) + blockId.x
+					WN* wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(threadidy), WN_COPY_Tree(griddimx));
+					wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(blockidx));
+					//////////////////////////////////////////////////////////////////////////
+					reductionMap.wn_IndexOpr = wn_reduction_Idx;
+					//wn_If_stmt
+					wn_If_stmt_test = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+								WN_COPY_Tree(threadidx), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+				}
+				else //if(reductionMap.acc_stmt_location == ACC_INNER_LOOP)
+				{
+					//Index = (ThreadId.y * griddim.x + blockId.x) *blockdim.x +thread.x
+					WN* wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(threadidy), WN_COPY_Tree(griddimx));
+					wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(blockidx));
+					wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(blockdimx));
+					wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(threadidx));
+					//////////////////////////////////////////////////////////////////////////
+					reductionMap.wn_IndexOpr = wn_reduction_Idx;
+				}
+				//if reduction is ADD, init value is 0;
+				WN* wn_reduction_init;
+				WN* wn_array_loc, *wn_stmt;
+				int initvalue = 0;
+				TY_IDX ty_red = ST_type(reductionMap.hostName);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
+				reductionMap.wn_initialAssign = wn_reduction_init;
+	   			//WN_INSERT_BlockLast( wn_replace_block,  wn_reduction_init);	
+				//////////////////////////////////////////////////////////////////////////////////
+				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									reductionMap.st_Inkernel);
+				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
+									Make_Pointer_Type(ty_red), wn_array_loc, WN_COPY_Tree(reductionMap.wn_private_var));
+
+				if(wn_If_stmt_test)
+				{
+					wn_stmt = WN_CreateBlock();
+					WN_INSERT_BlockLast(wn_stmt,  wn_reduction_init);
+					reductionMap.wn_assignment2Array = WN_CreateIf(wn_If_stmt_test, wn_stmt, WN_CreateBlock());
+				}
+				else
+					reductionMap.wn_assignment2Array = wn_reduction_init;
+				//reductionMap.wn_private_var;
+				
+				/////////////////////////////////////////////////////////////////
+				acc_loopinfo.acc_forloop[0].reductionmap[RDIdx] = reductionMap;
+				/////////////////////////////////////////////////////////////////	
+				RDIdx ++;
+			}  
+			RDIdx = 0;
+			while(RDIdx < acc_loopinfo.acc_forloop[1].reductionmap.size())
+			{
+				//among workers, if reduction stmt is in inner body, the reduction will be in this gang/block
+				//shared memory	
+				ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[1].reductionmap[RDIdx];
+				ST* st_reduction_private_var = reductionMap.st_private_var;
+				//////////////////////////////////////////////////////////////////////////////////
+				//acc_global_memory_for_reduction_block
+				TY_IDX ty_red = ST_type(reductionMap.hostName);
+				TYPE_ID typeID = TY_mtype(ty_red);
+				ST* local_RedArray = acc_global_memory_for_reduction_block[typeID];
+				if(!local_RedArray)
+				{
+					TY_IDX ty = Be_Type_Tbl(typeID);//Make_Array_Type(TY_mtype(ty), 1, 1024);
+					TY_IDX ty_array = Make_Pointer_Type(ty);
+					ST* local_array_red = New_ST(CURRENT_SYMTAB); 
+					ST_Init(local_array_red,
+					  Save_Str2("__gdata_", ACC_Get_ScalarName_of_Reduction(typeID)),
+					  CLASS_VAR,
+					  SCLASS_AUTO,
+					  EXPORT_LOCAL,
+					  ty_array);
+
+					WN* wn_offset = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockdimy));
+					wn_offset = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_offset, WN_COPY_Tree(blockidx));
+					WN* wn_base = WN_Ldid(Pointer_type, 0, reductionMap.st_Inkernel, 
+								ST_type(reductionMap.st_Inkernel));
+					wn_offset = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_offset, wn_base);
+					wn_offset = WN_Stid(Pointer_type, 0, local_array_red, ST_type(local_array_red), wn_offset); 
+	   				WN_INSERT_BlockLast( wn_replace_block,  wn_offset);
+					acc_global_memory_for_reduction_block[typeID] = local_array_red;
+					reductionMap.st_local_array = local_array_red;
+					//Set_ST_ACC_shared_array(*st_shared_array_4parallelRegion);
+					//ty_shared_array_in_parallel = ty_array;
+				}
+				else
+					reductionMap.st_local_array = local_RedArray;
+				//ST* old_st = reductionMap.hostName;
+				//TY_IDX ty = ST_type(old_st);
+				//there are 2 situations
+				//reduction in vector -body
+				WN* wn_if_stmt_test = NULL;
+				if(reductionMap.acc_stmt_location == ACC_INNER_LOOP)
+				{
+					//array index
+					//tid = threadIdx.y * blockdim.x + threadIdx.x
+					WN* wn_ArrIndex = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+										WN_COPY_Tree(threadidy), WN_COPY_Tree(blockdimx));
+					wn_ArrIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+										wn_ArrIndex, WN_COPY_Tree(threadidx));
+					reductionMap.wn_IndexOpr = wn_ArrIndex;
+					//wn_ArrIndex = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), wn_ArrIndex);
+				}
+				//reduction in worker -body
+				else //if(reductionMap.acc_stmt_location == ACC_MIDDER_LOOP)
+				{
+					WN* wn_ArrIndex = WN_COPY_Tree(threadidy);
+					reductionMap.wn_IndexOpr = wn_ArrIndex;
+					wn_if_stmt_test = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+								WN_COPY_Tree(threadidx), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+				}
+				
+				//if reduction is ADD, init value is 0;
+				WN* wn_reduction_init;
+				WN* wn_array_loc, *wn_stmt;
+				int initvalue = 0;
+				//Init reduction private data
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
+	   			
+	   			reductionMap.wn_initialAssign = wn_reduction_init;	
+				//////////////////////////////////////////////////////////////////////////////////
+				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									reductionMap.st_local_array);
+				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
+									Make_Pointer_Type(ty_red), wn_array_loc, 
+									WN_COPY_Tree(reductionMap.wn_private_var));
+				
+				if(wn_if_stmt_test)
+				{
+					wn_stmt = WN_CreateBlock();
+					WN_INSERT_BlockLast(wn_stmt,  wn_reduction_init);
+					reductionMap.wn_assignment2Array = WN_CreateIf(wn_if_stmt_test, wn_stmt, WN_CreateBlock());
+				}
+				else
+					reductionMap.wn_assignment2Array = wn_reduction_init;
+				////////////////////////////////////////////////////////////////////////////////////////////
+				WN* wn_storeback2PrivateVar = ACC_LoadDeviceSharedArrayElem(WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0), 
+										reductionMap.st_local_array);	
+				wn_storeback2PrivateVar = WN_Iload(typeID, 0,  ty_red, wn_storeback2PrivateVar);
+				wn_storeback2PrivateVar = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   										reductionMap.st_private_var, ST_type(reductionMap.st_private_var), 
+	   										wn_storeback2PrivateVar);
+				reductionMap.wn_assignBack2PrivateVar = wn_storeback2PrivateVar;
+				////////////////////////////////////////////////////////////////////////////////////////////
+				acc_loopinfo.acc_forloop[1].reductionmap[RDIdx] = reductionMap;
+				RDIdx ++;
+			}
+			
+			RDIdx = 0;
+			while(RDIdx < acc_loopinfo.acc_forloop[2].reductionmap.size())
+			{
+				//among workers, if reduction stmt is in inner body, the reduction will be in this gang/block
+				//shared memory	
+				ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[2].reductionmap[RDIdx];
+				ST* st_reduction_private_var = reductionMap.st_private_var;
+				//////////////////////////////////////////////////////////////////////////////////
+				//acc_global_memory_for_reduction_block
+				TY_IDX ty_red = ST_type(reductionMap.hostName);
+				TYPE_ID typeID = TY_mtype(ty_red);
+				ST* local_RedArray = acc_global_memory_for_reduction_block[typeID];
+				if(!local_RedArray)
+				{
+					TY_IDX ty = Be_Type_Tbl(typeID);//Make_Array_Type(TY_mtype(ty), 1, 1024);
+					TY_IDX ty_array = Make_Pointer_Type(ty);
+					ST* local_arra_red = New_ST(CURRENT_SYMTAB); 
+					ST_Init(local_arra_red,
+					  Save_Str2("__gdata_", ACC_Get_ScalarName_of_Reduction(typeID)),
+					  CLASS_VAR,
+					  SCLASS_AUTO,
+					  EXPORT_LOCAL,
+					  ty_array);
+
+					WN* wn_offset = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockdimy));
+					wn_offset = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_offset, WN_COPY_Tree(blockidx));
+					WN* wn_base = WN_Ldid(Pointer_type, 0, reductionMap.st_Inkernel, 
+								ST_type(reductionMap.st_Inkernel));
+					wn_offset = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_offset, wn_base);
+					wn_offset = WN_Stid(Pointer_type, 0, local_arra_red, ST_type(local_arra_red), wn_offset); 
+	   				WN_INSERT_BlockLast( wn_replace_block,  wn_offset);
+					acc_global_memory_for_reduction_block[typeID] = local_arra_red;
+					reductionMap.st_local_array = local_arra_red;
+					//Set_ST_ACC_shared_array(*st_shared_array_4parallelRegion);
+					//ty_shared_array_in_parallel = ty_array;
+				}
+				else
+					reductionMap.st_local_array = local_RedArray;
+				//ST* old_st = reductionMap.hostName;
+				//TY_IDX ty = ST_type(old_st);
+				//there are 2 situations
+				//reduction in vector -body
+				//WN* wn_if_stmt_test = NULL;
+				//reduction in worker -body
+				 //if(reductionMap.acc_stmt_location == ACC_MIDDER_LOOP)
+				//{
+				
+				WN* wn_ArrIndex = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									WN_COPY_Tree(threadidy), WN_COPY_Tree(blockdimx));
+				wn_ArrIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									wn_ArrIndex, WN_COPY_Tree(threadidx));
+				reductionMap.wn_IndexOpr = wn_ArrIndex;
+				//wn_if_stmt_test = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+				//			WN_COPY_Tree(threadidx), 
+				//			WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+				//}
+				
+				//if reduction is ADD, init value is 0;
+				WN* wn_reduction_init;
+				WN* wn_array_loc, *wn_stmt1;
+				int initvalue = 0;
+				//TY_IDX ty_red = ST_type(reductionMap.hostName);
+				//Init reduction private data
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
+	   			reductionMap.wn_initialAssign = wn_reduction_init;	
+				//////////////////////////////////////////////////////////////////////////////////
+				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									reductionMap.st_local_array);
+				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
+									Make_Pointer_Type(ty_red), wn_array_loc,
+									WN_COPY_Tree(reductionMap.wn_private_var));
+
+				//if(wn_if_stmt_test)
+				//{
+				//	wn_stmt = WN_CreateBlock();
+				//	WN_INSERT_BlockLast( ,  wn_reduction_init);
+				//	reductionMap.wn_assignment2Array = WN_CreateIf(wn_if_stmt_test, wn_stmt, WN_CreateBlock());
+				//}
+				//else
+				reductionMap.wn_assignment2Array = wn_reduction_init;
+				////////////////////////////////////////////////////////////////////////////////////////////
+				WN* wn_storeBackIndex = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									WN_COPY_Tree(threadidy), WN_COPY_Tree(blockdimx));
+				WN* wn_storeback2PrivateVar = ACC_LoadDeviceSharedArrayElem(wn_storeBackIndex, 
+										reductionMap.st_local_array);	
+				wn_storeback2PrivateVar = WN_Iload(typeID, 0,  ty_red, wn_storeback2PrivateVar);
+				wn_storeback2PrivateVar = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   										reductionMap.st_private_var, ST_type(reductionMap.st_private_var), 
+	   										wn_storeback2PrivateVar);
+				reductionMap.wn_assignBack2PrivateVar = wn_storeback2PrivateVar;
+				////////////////////////////////////////////////////////////////////////////////////////////
+				acc_loopinfo.acc_forloop[2].reductionmap[RDIdx] = reductionMap;
+				RDIdx ++;
+			}
+		}
+		//for 2 level nested loop
+		//for reduction in outter body
+		//for reduction in inner body
+		//
+		else if(acc_loopinfo.loopnum == 2)			
+		{
+			INT32 RDIdx = 0;
+			while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+			{
+				//WN* reduction_Idx1;
+				//WN* reduction_Idx2;
+				//WN* reduction_Idx3;
+				WN* wn_If_stmt_test = NULL;
+				ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+				ST* st_reduction_private_var = reductionMap.st_private_var;
+				
+				if(reductionMap.acc_stmt_location == ACC_OUTTER_LOOP && reductionMap.looptype ==ACC_GANG)
+				{
+					reductionMap.wn_IndexOpr = blockidx;
+					WN* test1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+								WN_COPY_Tree(threadidx), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+					WN* test2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_y)), 
+								WN_COPY_Tree(threadidy), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_y)), 0));
+					wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, test1, test2);
+				}
+				else if(reductionMap.acc_stmt_location == ACC_OUTTER_LOOP && reductionMap.looptype ==ACC_GANG_WORKER)
+				{
+					//Index = (thread.y * gridim.x) + blockId.x
+					WN* wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(threadidy), WN_COPY_Tree(griddimx));
+					wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(blockidx));
+					//////////////////////////////////////////////////////////////////////////
+					reductionMap.wn_IndexOpr = wn_reduction_Idx;
+					
+					wn_If_stmt_test = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_y)), 
+								WN_COPY_Tree(threadidx), 
+								WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_y)), 0));
+				}
+				else if(reductionMap.acc_stmt_location = ACC_INNER_LOOP)
+				{
+					//Index = (ThreadId.y * griddim.x + blockId.x) *blockdim.x +thread.x
+					WN* wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(threadidy), WN_COPY_Tree(griddimx));
+					wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(blockidx));
+					wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(blockdimx));
+					wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					wn_reduction_Idx, WN_COPY_Tree(threadidx));
+					//////////////////////////////////////////////////////////////////////////
+					reductionMap.wn_IndexOpr = wn_reduction_Idx;
+				}				
+				
+				//if reduction is ADD, init value is 0;
+				WN* wn_reduction_init;
+				WN* wn_array_loc, *wn_stmt;
+				int initvalue = 0;
+				TY_IDX ty_red = ST_type(reductionMap.hostName);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
+				reductionMap.wn_initialAssign = wn_reduction_init;
+	   			//WN_INSERT_BlockLast( wn_replace_block,  wn_reduction_init);	
+				//////////////////////////////////////////////////////////////////////////////////
+				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									reductionMap.st_Inkernel);
+				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
+									Make_Pointer_Type(ty_red), wn_array_loc, WN_COPY_Tree(reductionMap.wn_private_var));
+
+				if(wn_If_stmt_test)
+				{
+					wn_stmt = WN_CreateBlock();
+					WN_INSERT_BlockLast(wn_stmt,  wn_reduction_init);
+					reductionMap.wn_assignment2Array = WN_CreateIf(wn_If_stmt_test, wn_stmt, WN_CreateBlock());
+				}
+				else
+					reductionMap.wn_assignment2Array = wn_reduction_init;
+				//reductionMap.wn_private_var;
+				/////////////////////////////////////////////////////////////////
+				acc_loopinfo.acc_forloop[0].reductionmap[RDIdx] = reductionMap;
+				/////////////////////////////////////////////////////////////////
+				RDIdx ++;
+			}
+			
+			RDIdx = 0;
+			while(RDIdx < acc_loopinfo.acc_forloop[1].reductionmap.size())
+			{				
+				//among workers, if reduction stmt is in inner body, the reduction will be in this gang/block
+				//shared memory	
+				ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[1].reductionmap[RDIdx];
+				ST* st_reduction_private_var = reductionMap.st_private_var;
+				//////////////////////////////////////////////////////////////////////////////////
+				//acc_global_memory_for_reduction_block
+				TY_IDX ty_red = ST_type(reductionMap.hostName);
+				TYPE_ID typeID = TY_mtype(ty_red);
+				ST* local_RedArray = acc_global_memory_for_reduction_block[typeID];
+				if(!local_RedArray)
+				{
+					TY_IDX ty = Be_Type_Tbl(typeID);//Make_Array_Type(TY_mtype(ty), 1, 1024);
+					TY_IDX ty_array = Make_Pointer_Type(ty);
+					ST* local_arra_red = New_ST(CURRENT_SYMTAB); 
+					ST_Init(local_arra_red,
+					  Save_Str2("__gdata_", ACC_Get_ScalarName_of_Reduction(typeID)),
+					  CLASS_VAR,
+					  SCLASS_AUTO,
+					  EXPORT_LOCAL,
+					  ty_array);
+
+					WN* wn_offset = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+	   					WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockdimy));
+					wn_offset = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_offset, WN_COPY_Tree(blockidx));
+					WN* wn_base = WN_Ldid(Pointer_type, 0, reductionMap.st_Inkernel, 
+								ST_type(reductionMap.st_Inkernel));
+					wn_offset = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+	   					wn_offset, wn_base);
+					wn_offset = WN_Stid(Pointer_type, 0, local_arra_red, ST_type(local_arra_red), wn_offset); 
+	   				WN_INSERT_BlockLast( wn_replace_block,  wn_offset);
+					acc_global_memory_for_reduction_block[typeID] = local_arra_red;
+					reductionMap.st_local_array = local_arra_red;
+					//Set_ST_ACC_shared_array(*st_shared_array_4parallelRegion);
+					//ty_shared_array_in_parallel = ty_array;
+				}
+				else
+					reductionMap.st_local_array = local_RedArray;
+				//ST* old_st = reductionMap.hostName;
+				//TY_IDX ty = ST_type(old_st);
+				//there are 2 situations
+				//reduction in vector -body
+				WN* wn_if_stmt_test = NULL;
+				WN* wn_ArrIndex = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									WN_COPY_Tree(threadidy), WN_COPY_Tree(blockdimx));
+				wn_ArrIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									wn_ArrIndex, WN_COPY_Tree(threadidx));
+				reductionMap.wn_IndexOpr = wn_ArrIndex;
+				
+				//if reduction is ADD, init value is 0;
+				WN* wn_reduction_init;
+				WN* wn_array_loc, *wn_stmt1;
+				int initvalue = 0;
+				//TY_IDX ty_red = ST_type(reductionMap.hostName);
+				//Init reduction private data
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
+	   			
+	   			reductionMap.wn_initialAssign = wn_reduction_init;	
+				//////////////////////////////////////////////////////////////////////////////////
+				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									reductionMap.st_Inkernel);
+				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
+									Make_Pointer_Type(ty_red), wn_array_loc, WN_COPY_Tree(reductionMap.wn_private_var));
+
+				
+				reductionMap.wn_assignment2Array = wn_reduction_init;
+				////////////////////////////////////////////////////////////////////////////////////////////
+				WN* wn_storeBackIndex;
+				if(reductionMap.looptype == ACC_VECTOR)
+					wn_storeBackIndex = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									WN_COPY_Tree(threadidy), WN_COPY_Tree(blockdimx));
+				else if(reductionMap.looptype == ACC_WORKER_VECTOR)
+					wn_storeBackIndex = WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0);
+					
+				WN* wn_storeback2PrivateVar = ACC_LoadDeviceSharedArrayElem(wn_storeBackIndex, 
+										reductionMap.st_local_array);	
+				wn_storeback2PrivateVar = WN_Iload(typeID, 0,  ty_red, wn_storeback2PrivateVar);
+				wn_storeback2PrivateVar = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   										reductionMap.st_private_var, ST_type(reductionMap.st_private_var), 
+	   										wn_storeback2PrivateVar);
+				reductionMap.wn_assignBack2PrivateVar = wn_storeback2PrivateVar;
+				////////////////////////////////////////////////////////////////////////////////////////////
+				
+				acc_loopinfo.acc_forloop[1].reductionmap[RDIdx] = reductionMap;
+				RDIdx ++;
+			}
+		}
+		// for single level nested loop
+		//
+		else
+		{
+			INT32 RDIdx = 0;
+			while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+			{
+				//WN* reduction_Idx1;
+				//WN* reduction_Idx2;
+				//WN* reduction_Idx3;
+				ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+				ST* st_reduction_private_var = reductionMap.st_private_var;
+				
+				//ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];			
+				//Index = (ThreadId.y * griddim.x + blockId.x) *blockdim.x +thread.x
+				WN* wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+   					WN_COPY_Tree(threadidy), WN_COPY_Tree(griddimx));
+				wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_x)),
+   					wn_reduction_Idx, WN_COPY_Tree(blockidx));
+				wn_reduction_Idx = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)),
+   					wn_reduction_Idx, WN_COPY_Tree(blockdimx));
+				wn_reduction_Idx = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)),
+   					wn_reduction_Idx, WN_COPY_Tree(threadidx));
+				//////////////////////////////////////////////////////////////////////////);
+				reductionMap.wn_IndexOpr = wn_reduction_Idx;
+				
+				//if reduction is ADD, init value is 0;
+				//if reduction is ADD, init value is 0;
+				WN* wn_reduction_init;
+				WN* wn_array_loc, *wn_stmt1;
+				int initvalue = 0;
+				TY_IDX ty_red = ST_type(reductionMap.hostName);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
+	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
+				reductionMap.wn_initialAssign = wn_reduction_init;
+	   			//WN_INSERT_BlockLast( wn_replace_block,  wn_reduction_init);	
+				//////////////////////////////////////////////////////////////////////////////////
+				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									reductionMap.st_Inkernel);
+				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
+									Make_Pointer_Type(ty_red), wn_array_loc, WN_COPY_Tree(reductionMap.wn_private_var));
+
+				reductionMap.wn_assignment2Array = wn_reduction_init;
+				/////////////////////////////////////////////////////////////
+				/////////////////////////////////////////////////////////////
+				acc_loopinfo.acc_forloop[0].reductionmap[RDIdx] = reductionMap;
+				/////////////////////////////////////////////////////////////	
+				RDIdx ++;
+			}
+		}
+	   
+   	}
+}
+
+static void ACC_SharedMemory_Reduction(WN* wn_replace_block)
+{
+}
+
+static void ACC_DynamicParallelism_Reduction(WN* wn_replace_block)
+{
 }
 
 /*
 Transform for statement into GPU kernel statements.
 written by daniel tian.
 return a tree to replace for_tree, and for_tree should not be
-contained in other trees..
+contained in other trees.
+
+This is for parallel region transformation
 */
-static inline WN *
+static WN *
 ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 {
 	//Retrieve all the information need, then switch the sym table.
@@ -3013,143 +3799,43 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	WN* wn_MidIndexStep = NULL;
 	WN* wn_OuterIndexStep = NULL;
 	//Set up predefined variable in CUDA
-	WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+	threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
 					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
-	WN* threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
+	threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
 					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
-	WN* threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
+	threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
 					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
 	
-	WN* blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
+	blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
 					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
-	WN* blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
+	blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
 					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
-	WN* blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
+	blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
 					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
 	
-	WN* blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+	blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
 					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
-	WN* blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
+	blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
 					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
-	WN* blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
+	blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
 					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
 	
-	WN* griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
+	griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
 					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
-	WN* griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
+	griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
 					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
-	WN* griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
+	griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
 					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
 	///////////////////////////////////////////////////////////////////
-   IndexGenerationBlock = WN_CreateBlock ();	
-	//Generate some information for reduction algorithm
-   if(acc_loopinfo.acc_forloop[0].reductionmap.size() != 0)
-   {
-	   ST* st_reduction_idx1 = New_ST( CURRENT_SYMTAB );
-	   char reduction_idx_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
-	   
-	   sprintf ( reduction_idx_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-	   kernel_tmp_variable_count ++;
-
-
-	   ST_Init(st_reduction_idx1, Save_Str(reduction_idx_localname), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-
-	   ST* st_reduction_idx2 = New_ST( CURRENT_SYMTAB );
-	   
-	   sprintf ( reduction_idx_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-	   kernel_tmp_variable_count ++;
-
-
-	   ST_Init(st_reduction_idx2, Save_Str(reduction_idx_localname), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-	   /////////////////////////////////////////////////////////////////////
-	   //temp = blockdimx * griddimx
-	   WN* reduction_Idx1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)),
-	   				WN_COPY_Tree(blockdimx), WN_COPY_Tree(griddimx));
-			  
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx1)), 0, 
-	   					st_reduction_idx1, ST_type(st_reduction_idx1), reduction_Idx1);   
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);
-	   /////////////////////////////////////////////////////////////////////
-	   //temp = temp * (blockIdx.y + threadIdx.y)
-	   WN* wn_temp1 = WN_Ldid(TY_mtype(ST_type(st_reduction_idx1)), 
-						0, st_reduction_idx1, ST_type(st_reduction_idx1));
-	   
-	   reduction_Idx1 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(threadidy), WN_COPY_Tree(blockidy));
-	   reduction_Idx1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(wn_temp1), reduction_Idx1);
-	   
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx1)), 0, 
-	   					st_reduction_idx1, ST_type(st_reduction_idx1), reduction_Idx1);  
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);
-	   //////////////////////////////////////////////////////////////////
-	   //reduction_idx = blockIdx.x * blockdim.x + threadIdx.x;
-	   
-	   reduction_Idx1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(blockidx), WN_COPY_Tree(blockdimx));
-	   reduction_Idx1 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(threadidx), reduction_Idx1);
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx2)), 0, 
-	   					st_reduction_idx2, ST_type(st_reduction_idx2), reduction_Idx1); 
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);
-	   /////////////////////////////////////////////////////////////////
-	   //reduction_idx = reduction_idx + temp;
-	   WN* wn_temp2 = WN_Ldid(TY_mtype(ST_type(st_reduction_idx2)), 
-						0, st_reduction_idx2, ST_type(st_reduction_idx2));
-	   reduction_Idx1 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(wn_temp1), wn_temp2);	 
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx2)), 0, 
-	   					st_reduction_idx2, ST_type(st_reduction_idx2), reduction_Idx1); 
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);		  
-	   acc_wn_reduction_index = wn_temp2;
-   	}
+	///////////////////////////////////////////////////////////////////
+   IndexGenerationBlock = WN_CreateBlock ();
+	//Call reduction generation
+	ACC_GlobalMemory_Reduction(IndexGenerationBlock);
    //reduction[reduction_idx] = 0;
    //acc_wn_reduction_index;   
-   ACC_VAR_TABLE* accVar = NULL;   
-   for (accVar=acc_local_var_table; accVar->orig_st; accVar++)
-   {
-   		if(accVar->vtype == ACC_VAR_GANG_REDUCTION)
-		{
-			int isize = TY_size(ST_type(accVar->orig_st));
-			WN* wn_index = WN_Binary(OPR_MPY, 
-						TY_mtype(ST_type(accVar->orig_st)), 
-						WN_COPY_Tree(acc_wn_reduction_index), 
-						WN_Intconst(MTYPE_I4, isize));
-			WN* wn_LoadReductionArray = WN_Ldid(Pointer_type, 0, 
-									accVar->new_st, ST_type(accVar->new_st));
-			WN* wn_ptrLoc = WN_Binary(OPR_ADD, TY_mtype(ST_type(accVar->new_st)), 
-										wn_index, wn_LoadReductionArray);
-			//if reduction is ADD, init value is 0;
-			WN* wn_reduction_init;
-			WN* wn_init_const;
-			int initvalue = 0;
-			TYPE_ID tid = TY_mtype(TY_pointed(ST_type(accVar->new_st)));
-
-			if(accVar->reduction_opr == OPR_ADD)
-				initvalue = 0;
-			else if(accVar->reduction_opr == OPR_MPY)
-				initvalue = 1;
-			else
-				Is_True(FALSE, ("Unsupportted acc reduction OPERATOR."));
-
-			
-			if(tid>= MTYPE_I1 && tid <= MTYPE_U8)
-				wn_init_const = WN_Intconst(tid, initvalue);
-			else
-				wn_init_const = WN_Floatconst(tid, initvalue);
-
-			
-			wn_reduction_init = WN_Istore(tid, 0, ST_type(accVar->new_st), 
-												wn_ptrLoc, wn_init_const);
-			
-   			WN_INSERT_BlockLast( IndexGenerationBlock,  wn_reduction_init);		  
-		}
-   	}
-		
-    	//////////////////////////////////////////////////////////////////////////////////////
-	///////////////////////////////////////////////////////////////////
+   //ACC_VAR_TABLE* accVar = NULL;   		
+   //////////////////////////////////////////////////////////////////////////////////////
+   ///////////////////////////////////////////////////////////////////
 
 	if(acc_loopinfo.loopnum == 1)
 	{
@@ -3180,6 +3866,14 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 				SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
 	  
 	  WN* wn_index = WN_Ldid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index));
+	  
+	  INT32 RDIdx = 0;
+	  /*while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+           {
+      	       ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+		WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
+		RDIdx ++;
+  	   }*/
 	  
    	  if(looptype == ACC_GANG_VECTOR || looptype ==ACC_NONE_SPECIFIED)
    	  {
@@ -3292,7 +3986,14 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   //localize the ST for the kernel body
 	   //ACC_Localize_Parent_Stack lps(FALSE, NULL);
 	   WN_INSERT_BlockLast(IndexGenerationBlock, wn_forloop);
-	   //ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
+	   RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_assignment2Array);
+			//launch dynamic parallism here
+			RDIdx ++;
+		}
 	}
 	else if(acc_loopinfo.loopnum == 2)
 	{
@@ -3309,7 +4010,7 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   ACC_LOOP_TYPE OuterType = acc_loopinfo.acc_forloop[0].looptype;
 	   ACC_LOOP_TYPE InnerType = acc_loopinfo.acc_forloop[1].looptype;
 
-	   IndexGenerationBlock = WN_CreateBlock ();
+	   //IndexGenerationBlock = WN_CreateBlock ();
 	   
 		WN* wn_InnerIndex = WN_Ldid(TY_mtype(ST_type(st_InnerIndex)), 
 								0, st_InnerIndex, ST_type(st_InnerIndex));
@@ -3329,6 +4030,14 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 		WN* InnerIteratorIndexOp;
 		WN* wn_InnerLoopBody = WN_CreateBlock ();
 		WN* wn_OutterLoopbody = WN_CreateBlock ();
+		
+	    UINT32 RDIdx = 0;
+		/*while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
+			RDIdx ++;
+		}*/
 
 	   if(OuterType ==  ACC_GANG && InnerType == ACC_VECTOR)
 	   {
@@ -3527,9 +4236,39 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 
 	   //handling nonperfect loopnest
 	   if(acc_loopinfo.acc_forloop[0].wn_prehand_nodes)
-	   	WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+	   		WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+	    /********************************************************************************/
+	    /********************************************************************************/
+	    /*RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[1].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[1].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( wn_OutterLoopbody,  reductionMap.wn_initialAssign);
+			RDIdx ++;
+		}*/
+	    /********************************************************************************/
 	   
 	   WN_INSERT_BlockLast( wn_OutterLoopbody,	wn_innerforloop);
+	    /********************************************************************************/
+	    /********************************************************************************/
+		RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[1].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[1].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( wn_OutterLoopbody,  reductionMap.wn_assignment2Array);
+			//Call inner local reduction
+			/****************************************************************************/
+			if(reductionMap.reduction_kenels)
+			{
+				WN* wn_call = ACC_Gen_Call_Local_Reduction(reductionMap.reduction_kenels, reductionMap.st_local_array);
+				WN_INSERT_BlockLast( wn_OutterLoopbody,  wn_call);
+			}
+			WN_INSERT_BlockLast( wn_OutterLoopbody,  reductionMap.wn_assignBack2PrivateVar);
+			//Call inner local reduction
+			/****************************************************************************/
+			RDIdx ++;
+		}
+	    /********************************************************************************/
 	   
 	   //handling nonperfect loopnest
 	   if(acc_loopinfo.acc_forloop[0].wn_afterhand_nodes)
@@ -3545,8 +4284,16 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 		//localize the ST for the kernel body
 		//ACC_Localize_Parent_Stack lps(FALSE, NULL);		
 		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_Outerforloop);
-		//ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
-	   
+	    /********************************************************************************/
+	    /********************************************************************************/
+		RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_assignment2Array);
+			RDIdx ++;
+		}
+	    /********************************************************************************/
 	   /***********************************************************/
 	   //WN_INSERT_BlockFirst ( acc_stmt_block,  IteratorIndex);
 	}
@@ -3569,7 +4316,7 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   ACC_LOOP_TYPE MidType = acc_loopinfo.acc_forloop[1].looptype;
 	   ACC_LOOP_TYPE InnerType = acc_loopinfo.acc_forloop[2].looptype;
 
-	   IndexGenerationBlock = WN_CreateBlock ();
+	   //IndexGenerationBlock = WN_CreateBlock ();
 	   
 		WN* wn_InnerIndex = WN_Ldid(TY_mtype(ST_type(st_InnerIndex)), 
 								0, st_InnerIndex, ST_type(st_InnerIndex));
@@ -3585,6 +4332,17 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 		WN* InnerDOBlock = WN_CreateBlock();
 		WN* MidDOBlock = WN_CreateBlock();
 		WN* OuterDOBlock = WN_CreateBlock();
+
+	    /********************************************************************************/
+	    /********************************************************************************/
+		UINT32 RDIdx = 0;
+		/*while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
+			RDIdx ++;
+		}*/
+	    /********************************************************************************/
 
 	   //this is the only combination
 	   if(OutterType ==  ACC_GANG && MidType == ACC_WORKER &&InnerType == ACC_VECTOR)
@@ -3669,43 +4427,7 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   
 	   /***********************************************************/
 	   /////////////////////////////////////////////////////////////
-	   //Let's begin analysis the statement in this kernel block	   
-
-		//WN* doLoopBody = acc_loopinfo.acc_forloop[2].acc_loopbody;	
-	   
-	    /*WN* ConditionalExeL = WN_Relational (OPR_GE, TY_mtype(ST_type(st_OutIndex)), 
-									WN_COPY_Tree(wn_OuterIndex), 
-									WN_COPY_Tree(acc_loopinfo.acc_forloop[0].init));
-		
-	    WN* ConditionalExeM = WN_Relational (OPR_GE, TY_mtype(ST_type(st_MidIndex)), 
-									WN_COPY_Tree(wn_MidIndex), 
-									WN_COPY_Tree(acc_loopinfo.acc_forloop[1].init));
-		
-	    WN* ConditionalExeR = WN_Relational (OPR_GE, TY_mtype(ST_type(st_InnerIndex)), 
-									WN_COPY_Tree(wn_InnerIndex), 
-									WN_COPY_Tree(acc_loopinfo.acc_forloop[2].init));
-	    WN* ConditionalExe = WN_LAND (ConditionalExeL, ConditionalExeM);
-	    	ConditionalExe = WN_LAND (ConditionalExe, ConditionalExeR);
-		WN* doLoopBody = WN_CreateIf(ConditionalExe, 
-					acc_loopinfo.acc_forloop[2].acc_loopbody, 
-					WN_CreateBlock());
-
-
-		WN_INSERT_BlockLast( InnerDOBlock,  doLoopBody);
-		WN_INSERT_BlockLast( InnerDOBlock,  InnerIteratorIndexOp);
-		WN* InnerTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[2].acc_test_stmt);
-		WN* whileDO = WN_CreateWhileDo(InnerTest, InnerDOBlock);
-
-		WN_INSERT_BlockLast( MidDOBlock,	whileDO);			
-		WN_INSERT_BlockLast( MidDOBlock,	MidIteratorIndexOp);
-		WN* MidTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[1].acc_test_stmt);
-		whileDO = WN_CreateWhileDo(MidTest, MidDOBlock);
-		
-
-		WN_INSERT_BlockLast( OuterDOBlock,  whileDO);			
-		WN_INSERT_BlockLast( OuterDOBlock,  OuterIteratorIndexOp);
-		WN* OuterTest = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
-		whileDO = WN_CreateWhileDo(OuterTest, OuterDOBlock);   */
+		//Let's begin analysis the statement in this kernel block	   
 		//localize the ST for the kernel body
 		//ACC_Localize_Parent_Stack lps(FALSE, NULL);
 	   WN* wn_Outer_for_test = WN_COPY_Tree(acc_loopinfo.acc_forloop[0].acc_test_stmt);
@@ -3718,8 +4440,40 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   //handling nonperfect loopnest
 	   if(acc_loopinfo.acc_forloop[1].wn_prehand_nodes)
 	   	WN_INSERT_BlockLast( MidDOBlock,	acc_loopinfo.acc_forloop[1].wn_prehand_nodes);
+		
+	    /********************************************************************************/
+	    /********************************************************************************/
+		RDIdx = 0;
+		/*while(RDIdx < acc_loopinfo.acc_forloop[2].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( MidDOBlock,  reductionMap.wn_initialAssign);
+			RDIdx ++;
+		}*/
+	    /********************************************************************************/
 	   
 	   WN_INSERT_BlockLast( MidDOBlock,	wn_innerforloop);
+		
+	    /********************************************************************************/
+	    /********************************************************************************/
+		RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[2].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[2].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( MidDOBlock,  reductionMap.wn_assignment2Array);
+			//Call inner local reduction
+			/****************************************************************************/
+			if(reductionMap.reduction_kenels)
+			{
+				WN* wn_call = ACC_Gen_Call_Local_Reduction(reductionMap.reduction_kenels, reductionMap.st_local_array);
+				WN_INSERT_BlockLast( MidDOBlock,  wn_call);
+			}
+			WN_INSERT_BlockLast( MidDOBlock,  reductionMap.wn_assignBack2PrivateVar);
+			//Call inner local reduction
+			/****************************************************************************/
+			RDIdx ++;
+		}
+	    /********************************************************************************/
 	   
 	   //handling nonperfect loopnest
 	   if(acc_loopinfo.acc_forloop[1].wn_afterhand_nodes)
@@ -3732,8 +4486,40 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   //handling nonperfect loopnest
 	   if(acc_loopinfo.acc_forloop[0].wn_prehand_nodes)
 	   	WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+	    /********************************************************************************/
+	    /********************************************************************************/
+		/*RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[1].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[1].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( OuterDOBlock,  reductionMap.wn_initialAssign);
+			RDIdx ++;
+		}*/
+	    /********************************************************************************/
 	   
 	   WN_INSERT_BlockLast( OuterDOBlock,	wn_Midforloop);
+		
+	    /********************************************************************************/
+	    /********************************************************************************/
+		RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[1].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[1].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( OuterDOBlock,  reductionMap.wn_assignment2Array);
+			//Call inner local reduction
+			/****************************************************************************/
+			if(reductionMap.reduction_kenels)
+			{
+				WN* wn_call = ACC_Gen_Call_Local_Reduction(reductionMap.reduction_kenels, reductionMap.st_local_array);
+				WN_INSERT_BlockLast( OuterDOBlock,  wn_call);
+			}
+			//Get the value after the reduction
+			WN_INSERT_BlockLast( OuterDOBlock,  reductionMap.wn_assignBack2PrivateVar);
+			//Call inner local reduction
+			/****************************************************************************/
+			RDIdx ++;
+		}
+	    /********************************************************************************/
 	   
 	   //handling nonperfect loopnest
 	   if(acc_loopinfo.acc_forloop[0].wn_afterhand_nodes)
@@ -3745,7 +4531,15 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   WN* wn_Outerforloop = WN_CreateDO(wn_Outerloopidame, wn_OuterIndexInit, wn_Outer_for_test, wn_OuterIndexStep, OuterDOBlock, NULL);
 
 		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_Outerforloop);
-		//ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
+		RDIdx = 0;
+		while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_assignment2Array);
+			RDIdx ++;
+		}
+		/****************************************************************/
+		//Dynamic launch reduction kernel or return host and let host handle everything else
 		///////////////////////////////////////////////////////
 	   
 	   /***********************************************************/
@@ -3757,26 +4551,7 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	}
 	
    	WN_INSERT_BlockLast ( wn_replace_block, IndexGenerationBlock );
-	/* Transfer any mappings for nodes moved from parent to parallel function */
-
-	//ACC_Transfer_Maps ( acc_pmaptab, acc_cmaptab, acc_parallel_func, 
-	//	  PU_Info_regions_ptr(Current_PU_Info) );
-
-	/* Create a new dependence graph for the child  and move all the 
-	 appropriate vertices from the parent to the child graph */
-
-	//Current_Map_Tab = acc_cmaptab;
-	//ACC_Fix_Dependence_Graph ( acc_ppuinfo, Current_PU_Info, acc_parallel_func ); 
-	//Current_Map_Tab = acc_pmaptab;
-
-  
-	/* Restore parent information. */
-
-	//CURRENT_SYMTAB = acc_psymtab;
-	//Current_PU_Info = acc_ppuinfo;
-	//Current_pu = &Current_PU_Info_pu();
-	//Current_Map_Tab = acc_pmaptab;
-	//ACC_Pop_Some_Globals( );
+	
 }
 
 
@@ -3786,7 +4561,7 @@ written by daniel tian.
 return a tree to replace for_tree, and for_tree should not be
 contained in other trees..
 */
-static inline WN *
+static WN *
 ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 {
 	//Retrieve all the information need, then switch the sym table.
@@ -3818,48 +4593,11 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	acc_pmaptab = Current_Map_Tab;
 	//outline
 	ACC_Push_Some_Globals( );
-    ACC_Create_MicroTask( PAR_FUNC_ACC_REGION, (void*)pKRInfo, FALSE);
+    ACC_Create_MicroTask( PAR_FUNC_ACC_KERNEL, (void*)pKRInfo, FALSE);
 	//
 	int kernel_index_count = 0;
-	/*for(i=0; i<acc_loopinfo.loopnum; i++)
-	{
-		TY_IDX index_ty = acc_loopinfo.acc_forloop[i].acc_index_type;
-		ST* new_indexst = New_ST( CURRENT_SYMTAB );
-
-		ST_Init(new_indexst,
-	      Save_Str( acc_loopinfo.acc_forloop[i].szIndexName),
-	      CLASS_VAR,
-	      SCLASS_AUTO,
-	      EXPORT_LOCAL,
-	      Be_Type_Tbl(MTYPE_U4));
-
-		//Put this variables in local table
-		ACC_VAR_TABLE* v = acc_local_var_table + kernel_param.size() + kernel_index_count;
-	    ACC_Create_Local_VariableTab(v, ACC_VAR_LOCAL, 
-				acc_loopinfo.acc_forloop[i].acc_index_st, 0, new_indexst);	
-		kernel_index_count ++;
-		
-		acc_loopinfo.acc_forloop[i].acc_newIndex = new_indexst;
-		
-		//Get the loop limit ST from the kernel parameters
-		int jj;
-		ST* new_limit_in_parameter;
-		for(jj=0; jj<kernel_param.size(); jj++)
-		{
-			ST* paramSt = kernel_param[jj];
-			if(!strcmp(ST_name(paramSt), acc_loopinfo.acc_forloop[i].szLimitName))
-			{
-				new_limit_in_parameter = paramSt;
-				break;
-			}
-		}
-		Is_True(jj <= kernel_parameters_count, ("didn't find the loop limit"));
-		acc_loopinfo.acc_forloop[i].acc_newLimit = new_limit_in_parameter;
-		//
-		//WN_st_idx(tree) = ST_st_idx(w->new_st);
-	}*/
+	
 	//create private list
-	int iPivateCount = 0;
 	for(i=0; i<acc_loopinfo.loopnum; i++)
 	{
 		WN* wn_node = acc_loopinfo.acc_forloop[i].acc_private;
@@ -3876,10 +4614,11 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		      SCLASS_AUTO,
 		      EXPORT_LOCAL,
 		      index_ty);//Put this variables in local table
-			ACC_VAR_TABLE* v = acc_local_var_table + kernel_param.size()
-							+ kernel_index_count + iPivateCount;
-		    ACC_Create_Local_VariableTab(v, ACC_VAR_LOCAL, st_private, 0, st_new_private);	
-			iPivateCount ++;
+			ACC_VAR_TABLE var;
+			var.has_offset = FALSE;
+			var.orig_st = st_private;
+			var.new_st = st_new_private;
+		    acc_local_new_var_map[st_private] = var;
 		}		
 	}
 	
@@ -3899,10 +4638,11 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		      SCLASS_AUTO,
 		      EXPORT_LOCAL,
 		      index_ty);//Put this variables in local table
-			ACC_VAR_TABLE* v = acc_local_var_table + kernel_param.size()
-							+ kernel_index_count + iPivateCount;
-		    ACC_Create_Local_VariableTab(v, ACC_VAR_LOCAL, st_private, 0, st_new_private);	
-			iPivateCount ++;
+			ACC_VAR_TABLE var;
+			var.has_offset = FALSE;
+			var.orig_st = st_private;
+			var.new_st = st_new_private;
+		    acc_local_new_var_map[st_private] = var;
 		}		
 	}
 	//Set up predefined variable in CUDA
@@ -3936,112 +4676,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	///////////////////////////////////////////////////////////////////
    IndexGenerationBlock = WN_CreateBlock ();	
 	//Generate some information for reduction algorithm
-   if(acc_loopinfo.acc_forloop[0].reductionmap.size() != 0)
-   {
-	   ST* st_reduction_idx1 = New_ST( CURRENT_SYMTAB );
-	   char reduction_idx_localname[256];// = (char *) alloca(strlen(ST_name(acc_tmp_name_prefix))+10);
-	   
-	   sprintf ( reduction_idx_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-	   kernel_tmp_variable_count ++;
-
-
-	   ST_Init(st_reduction_idx1, Save_Str(reduction_idx_localname), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-
-	   ST* st_reduction_idx2 = New_ST( CURRENT_SYMTAB );
-	   
-	   sprintf ( reduction_idx_localname, "%s%d", acc_tmp_name_prefix, kernel_tmp_variable_count);
-	   kernel_tmp_variable_count ++;
-
-
-	   ST_Init(st_reduction_idx2, Save_Str(reduction_idx_localname), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, Be_Type_Tbl(MTYPE_U4));
-	   /////////////////////////////////////////////////////////////////////
-	   //temp = blockdimx * griddimx
-	   WN* reduction_Idx1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)),
-	   				WN_COPY_Tree(blockdimx), WN_COPY_Tree(griddimx));
-			  
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx1)), 0, 
-	   					st_reduction_idx1, ST_type(st_reduction_idx1), reduction_Idx1);   
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);
-	   /////////////////////////////////////////////////////////////////////
-	   //temp = temp * (blockIdx.y + threadIdx.y)
-	   WN* wn_temp1 = WN_Ldid(TY_mtype(ST_type(st_reduction_idx1)), 
-						0, st_reduction_idx1, ST_type(st_reduction_idx1));
-	   
-	   reduction_Idx1 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(threadidy), WN_COPY_Tree(blockidy));
-	   reduction_Idx1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(wn_temp1), reduction_Idx1);
-	   
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx1)), 0, 
-	   					st_reduction_idx1, ST_type(st_reduction_idx1), reduction_Idx1);  
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);
-	   //////////////////////////////////////////////////////////////////
-	   //reduction_idx = blockIdx.x * blockdim.x + threadIdx.x;
-	   
-	   reduction_Idx1 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(blockidx), WN_COPY_Tree(blockdimx));
-	   reduction_Idx1 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(threadidx), reduction_Idx1);
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx2)), 0, 
-	   					st_reduction_idx2, ST_type(st_reduction_idx2), reduction_Idx1); 
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);
-	   /////////////////////////////////////////////////////////////////
-	   //reduction_idx = reduction_idx + temp;
-	   WN* wn_temp2 = WN_Ldid(TY_mtype(ST_type(st_reduction_idx2)), 
-						0, st_reduction_idx2, ST_type(st_reduction_idx2));
-	   reduction_Idx1 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockDim_y)),
-	   				WN_COPY_Tree(wn_temp1), wn_temp2);	 
-	   reduction_Idx1 = WN_Stid(TY_mtype(ST_type(st_reduction_idx2)), 0, 
-	   					st_reduction_idx2, ST_type(st_reduction_idx2), reduction_Idx1); 
-	   WN_INSERT_BlockLast( IndexGenerationBlock,  reduction_Idx1);		  
-	   acc_wn_reduction_index = wn_temp2;
-   	}
-   //reduction[reduction_idx] = 0;
-   //acc_wn_reduction_index;   
-   ACC_VAR_TABLE* accVar = NULL;   
-   for (accVar=acc_local_var_table; accVar->orig_st; accVar++)
-   {
-   		if(accVar->vtype == ACC_VAR_GANG_REDUCTION)
-		{
-			int isize = TY_size(ST_type(accVar->orig_st));
-			WN* wn_index = WN_Binary(OPR_MPY, 
-						TY_mtype(ST_type(accVar->orig_st)), 
-						WN_COPY_Tree(acc_wn_reduction_index), 
-						WN_Intconst(MTYPE_I4, isize));
-			WN* wn_LoadReductionArray = WN_Ldid(Pointer_type, 0, 
-									accVar->new_st, ST_type(accVar->new_st));
-			WN* wn_ptrLoc = WN_Binary(OPR_ADD, TY_mtype(ST_type(accVar->new_st)), 
-										wn_index, wn_LoadReductionArray);
-			//if reduction is ADD, init value is 0;
-			WN* wn_reduction_init;
-			WN* wn_init_const;
-			int initvalue = 0;
-			TYPE_ID tid = TY_mtype(TY_pointed(ST_type(accVar->new_st)));
-
-			if(accVar->reduction_opr == OPR_ADD)
-				initvalue = 0;
-			else if(accVar->reduction_opr == OPR_MPY)
-				initvalue = 1;
-			else
-				Is_True(FALSE, ("Unsupportted acc reduction OPERATOR."));
-
-			
-			if(tid>= MTYPE_I1 && tid <= MTYPE_U8)
-				wn_init_const = WN_Intconst(tid, initvalue);
-			else
-				wn_init_const = WN_Floatconst(tid, initvalue);
-
-			
-			wn_reduction_init = WN_Istore(tid, 0, ST_type(accVar->new_st), 
-												wn_ptrLoc, wn_init_const);
-			
-   			WN_INSERT_BlockLast( IndexGenerationBlock,  wn_reduction_init);		  
-		}
-   	}
-		
-    	//////////////////////////////////////////////////////////////////////////////////////
+    //////////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////
 
 	if(acc_loopinfo.loopnum == 1)
@@ -4055,10 +4690,10 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		//index = WN_CreateIdname(0,WN_st_idx(lcv));
 	   //If the reduction is not NULL, we need to conside it. acc_reduction;
 		//INT32 reduction_count;
-	   if(acc_loopinfo.acc_forloop[0].acc_reduction)
-   	   {
-   	  	  WN* reductionode = acc_loopinfo.acc_forloop[0].acc_reduction;		  
-   	   }
+	   //if(acc_loopinfo.acc_forloop[0].acc_reduction)
+   	   //{
+   	  	//  WN* reductionode = acc_loopinfo.acc_forloop[0].acc_reduction;		  
+   	   //}
 	   ST* st_index = acc_loopinfo.acc_forloop[0].acc_index_st;
 	   TYPE_ID IndexType = acc_loopinfo.acc_forloop[0].acc_index_type;
 	   //sST* st_limit = acc_loopinfo.acc_forloop[0].acc_newLimit;//acc_loopinfo.acc_forloop[0].condition
@@ -4143,9 +4778,8 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   
 	   WN* whileDO = WN_CreateWhileDo(test, Do_block);*/
 	   //localize the ST for the kernel body
-	   ACC_Localize_Parent_Stack lps(FALSE, NULL);
 	   WN_INSERT_BlockLast(IndexGenerationBlock, wn_forloop);
-	   ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
+	   ACC_Walk_and_Localize(IndexGenerationBlock);
 	}
 	else if(acc_loopinfo.loopnum == 2)
 	{
@@ -4515,7 +5149,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		//localize the ST for the kernel body
 		ACC_Localize_Parent_Stack lps(FALSE, NULL);		
 		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_Outerforloop);
-		ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
+		ACC_Walk_and_Localize(IndexGenerationBlock);
 	   
 	   /***********************************************************/
 	   //WN_INSERT_BlockFirst ( acc_stmt_block,  IteratorIndex);
@@ -5161,7 +5795,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		//localize the ST for the kernel body
 		ACC_Localize_Parent_Stack lps(FALSE, NULL);
 		WN_INSERT_BlockLast( IndexGenerationBlock,  wn_Outerforloop);
-		ACC_Walk_and_Localize(IndexGenerationBlock, acc_local_var_table, &lps);
+		ACC_Walk_and_Localize(IndexGenerationBlock);
 		///////////////////////////////////////////////////////
 	   
 	   /***********************************************************/
@@ -5332,26 +5966,25 @@ static void ACC_Extract_ACC_LoopNest_Info( WN * tree )
 		    break;
 			
 		  case WN_PRAGMA_ACC_CLAUSE_REDUCTION:
-		    for (wn = forloopinfo.acc_reduction; wn; wn = WN_next(wn))
-		      if (ACC_Identical_Pragmas(cur_node, wn))
-				break;
-		    if (wn == NULL) 
-			{
-	              if (WN_opcode(cur_node) != OPC_PRAGMA &&
+		  	{
+				if (WN_opcode(cur_node) != OPC_PRAGMA &&
 	                WN_operator(WN_kid0(cur_node)) == OPR_ARRAY &&
 	                OPCODE_has_sym(WN_opcode(WN_kid0(WN_kid0(cur_node)))) == 0) 
-	                {
-	                	WN_DELETE_Tree ( cur_node );
-	                } 
-				    else 
-					{
-		                WN_next(cur_node) = forloopinfo.acc_reduction;
-		                forloopinfo.acc_reduction = cur_node;
-			        	++forloopinfo.reduction_count;
-	              	}
-		    } 
-			else
-		      WN_DELETE_Tree ( cur_node );
+                {
+                	WN_DELETE_Tree ( cur_node );
+                } 
+			    else 
+				{
+					ACC_ReductionMap acc_reductionMap;
+					acc_reductionMap.acc_looplevel = (ACC_LOOP_LEVEL)acc_loopinfo.loopnum;
+					acc_reductionMap.hostName = WN_st(cur_node);
+					acc_reductionMap.ReductionOpr = (OPERATOR)WN_pragma_arg2(cur_node);
+	                //WN_next(cur_node) = forloopinfo.acc_reduction;
+	                forloopinfo.reductionmap.push_back(acc_reductionMap);
+		        	++forloopinfo.reduction_count;
+					acc_reduction_count ++;
+              	}
+		  	}
 		    break;
 			
 		  default:
@@ -6081,6 +6714,599 @@ static void ACC_Setup_GPU_toplogy_kernels(WN* replace_block)
 	}
 }
 
+static WN* ACC_GenGetTotalNumVectors()
+{
+	WN * wn;
+	wn = WN_Create(OPC_I4CALL, 0 );
+	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_GET_TOTAL_VECTORS);
+
+	WN_Set_Call_Non_Data_Mod(wn);
+	WN_Set_Call_Non_Data_Ref(wn);
+	WN_Set_Call_Non_Parm_Mod(wn);
+	WN_Set_Call_Non_Parm_Ref(wn);
+	WN_Set_Call_Parm_Ref(wn);
+	WN_linenum(wn) = acc_line_number;
+
+	return wn;
+}
+
+static WN* ACC_GenGetTotalNumGangs()
+{
+	WN * wn;
+	wn = WN_Create(OPC_I4CALL, 0 );
+	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_GET_TOTAL_GANGS);
+
+	WN_Set_Call_Non_Data_Mod(wn);
+	WN_Set_Call_Non_Data_Ref(wn);
+	WN_Set_Call_Non_Parm_Mod(wn);
+	WN_Set_Call_Non_Parm_Ref(wn);
+	WN_Set_Call_Parm_Ref(wn);
+	WN_linenum(wn) = acc_line_number;
+
+	return wn;
+}
+
+static WN* ACC_GenGetTotalNumGangsWorkers()
+{
+	WN * wn;
+	wn = WN_Create(OPC_I4CALL, 0 );
+	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_GET_TOTAL_GANGS_WORKERS);
+
+	WN_Set_Call_Non_Data_Mod(wn);
+	WN_Set_Call_Non_Data_Ref(wn);
+	WN_Set_Call_Non_Parm_Mod(wn);
+	WN_Set_Call_Non_Parm_Ref(wn);
+	WN_Set_Call_Parm_Ref(wn);
+	WN_linenum(wn) = acc_line_number;
+
+	return wn;
+}
+
+
+static BOOL ACC_Locate_Reduction(WN* tree, ST* st_rd, OPERATOR oprRD)
+{
+  OPCODE op;
+  OPERATOR opr;
+  INT32 i;
+  WN *r;
+  WN *temp;
+  ST *old_sym;
+  WN_OFFSET old_offset;
+  ACC_VAR_TABLE *w;
+  BOOL bFound = FALSE;
+
+  /* Ignore NULL subtrees. */
+
+  if (tree == NULL)
+    return FALSE;
+
+  /* Initialization. */
+
+  op = WN_opcode(tree);
+  opr = OPCODE_operator(op);
+
+  /* Look for and replace any nodes referencing localized symbols */
+  if (opr == OPR_STID)
+  {
+    old_sym = WN_st(tree);
+	WN* Kid0 = WN_kid0(tree);
+	if(WN_kid_count(Kid0) == 2)
+	{	
+		ST* st_Kid0 = WN_has_sym(WN_kid0(Kid0))? WN_st(WN_kid0(Kid0)) : NULL;
+		ST* st_Kid1 = WN_has_sym(WN_kid1(Kid0))? WN_st(WN_kid1(Kid0)) : NULL;
+		OPCODE opc_kid0 = WN_opcode(Kid0);
+		OPERATOR opr_kid0 = OPCODE_operator(opc_kid0);
+		if(st_rd == old_sym && opr_kid0 == oprRD && ((st_Kid0==st_rd)|| (st_Kid1 == st_rd)))
+			return TRUE;
+	}
+  } 
+  /* Walk all children */
+  if (op == OPC_BLOCK) 
+  {
+    r = WN_first(tree);
+    while (r) 
+	{ // localize each node in block
+      bFound = ACC_Locate_Reduction ( r, st_rd, oprRD);
+	  if(bFound)
+		return bFound;
+      r = WN_next(r);
+      
+   }
+  }
+  else 
+  {
+    for (i=0; i < WN_kid_count(tree); i++)
+    {
+      bFound = ACC_Locate_Reduction ( WN_kid(tree, i), st_rd, oprRD);
+	  if(bFound)
+		return bFound;
+    }
+  }
+  return FALSE;
+}
+
+static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
+{	
+	int i;
+	//Process reduction
+	i=0;
+	while(i < acc_parallel_loop_info.loopnum)
+	{
+		acc_loopinfo = acc_parallel_loop_info.acc_loopinfo[i];
+		/***************************************************************************/
+		/*************************Check the reduction here*****************************/
+		/***************************************************************************/
+		int iRdIdx;
+		//Only need to take care the top level reduction. Reduction operation in a single block will be handled
+		//in ACC_Transform_SingleForLoop. 
+		if(acc_loopinfo.loopnum == 3)
+		{
+			iRdIdx = 0;
+			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx];
+				ST *old_st = reductionmap.hostName;
+				//Locate Reduction stmt
+				FOR_LOOP_INFO* pForInfo0 = &acc_loopinfo.acc_forloop[0];
+				FOR_LOOP_INFO* pForInfo1 = &acc_loopinfo.acc_forloop[1];
+				FOR_LOOP_INFO* pForInfo2 = &acc_loopinfo.acc_forloop[2];
+				BOOL isLocated = FALSE;			
+				reductionmap.looptype = acc_loopinfo.acc_forloop[0].looptype;
+				//ACC_Locate_Reduction(&acc_loopinfo.acc_forloop[0]);
+				//locate where is the reduction statement.
+				//Scan outter loop body
+				if(pForInfo0->wn_prehand_nodes)
+				{
+					isLocated = ACC_Locate_Reduction(pForInfo0->wn_prehand_nodes, 
+						old_st, reductionmap.ReductionOpr);
+				}
+				
+				if(!isLocated && pForInfo0->wn_afterhand_nodes)
+				{
+					isLocated = ACC_Locate_Reduction(pForInfo0->wn_afterhand_nodes, 
+						old_st, reductionmap.ReductionOpr);
+				}
+				//Find it, then set location, else keeep searching
+				if(isLocated)
+					reductionmap.acc_stmt_location = ACC_OUTTER_LOOP;
+				else
+				{
+					//Scan inner loop body
+					if(pForInfo1->wn_prehand_nodes)
+					{
+						isLocated = ACC_Locate_Reduction(pForInfo1->wn_prehand_nodes, 
+							old_st, reductionmap.ReductionOpr);
+					}
+					
+					if(!isLocated && pForInfo1->wn_afterhand_nodes)
+					{
+						isLocated = ACC_Locate_Reduction(pForInfo1->wn_afterhand_nodes, 
+							old_st, reductionmap.ReductionOpr);
+					}
+					if(isLocated)
+						reductionmap.acc_stmt_location = ACC_MIDDER_LOOP;
+					else 
+						reductionmap.acc_stmt_location = ACC_INNER_LOOP;
+				}
+				/////////////////////////////////////////////////////////////////////////				
+				ST* st_num_vectors;
+				PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
+				if(reductionmap.acc_stmt_location == ACC_INNER_LOOP)
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumVectors());
+				else if(reductionmap.acc_stmt_location == ACC_MIDDER_LOOP)//count workers
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumGangsWorkers());
+				else if(reductionmap.acc_stmt_location == ACC_OUTTER_LOOP)//count gangs
+					//each worker carries one buffer unit
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumGangs());
+				/////////////////////////////////////////////////////////////////////////////////////////////
+				ACC_Host_Create_Preg_or_Temp(MTYPE_I4, "_total_num_of_vectors", &st_num_vectors);
+				ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
+				WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), rreg1, Return_Val_Preg, ST_type(st_num_vectors));
+				WN* temp_node = WN_Stid(TY_mtype(ST_type(st_num_vectors)), 0, 
+												st_num_vectors, ST_type(st_num_vectors), wn_return);
+				WN_INSERT_BlockLast( wn_replace_block, temp_node);
+
+				/////////////////////////////////////////////////////////////
+				WN* vector_num = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), 
+							0, st_num_vectors, ST_type(st_num_vectors));
+
+				///////////////////////////////////////////////////////////////////////
+				WN* alloc_size = WN_Binary(OPR_MPY, MTYPE_I4, WN_COPY_Tree(vector_num),
+						WN_Intconst(MTYPE_I4, TY_size(ST_type(reductionmap.hostName))));
+				//malloc device addr
+							
+				//reductionmap	
+				//ST *old_st = reductionmap.hostName;	
+			    TY_IDX ty = ST_type(old_st);
+			    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+			    char* localname = (char *) alloca(strlen(ST_name(old_st))+128);
+				sprintf ( localname, "__device_reduction_%s", ST_name(old_st) );
+				TY_IDX ty_p = Make_Pointer_Type(ty);
+				ST *st_device = NULL;
+				//WN *device_addr = NULL;
+				st_device = New_ST( CURRENT_SYMTAB );
+				ST_Init(st_device,
+						Save_Str( localname ),
+						CLASS_VAR,
+						SCLASS_AUTO,
+						EXPORT_LOCAL,
+						ty_p);		
+				reductionmap.deviceName = st_device;
+				reductionmap.st_num_of_element = st_num_vectors;
+				//call the acc malloc
+				WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
+		
+				reductionmap.reduction_kenels = ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
+				acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx] = reductionmap;
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				iRdIdx ++;
+			}
+			//check the Midder loop reduction
+			iRdIdx = 0;
+			while(iRdIdx<acc_loopinfo.acc_forloop[1].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[1].reductionmap[iRdIdx];
+				ST *old_st = reductionmap.hostName;
+				TY_IDX ty = ST_type(old_st);
+				TYPE_ID mtypeID = TY_mtype(ty);
+				reductionmap.looptype = acc_loopinfo.acc_forloop[1].looptype;
+				//Locate Reduction stmt
+				FOR_LOOP_INFO* pForInfo1 = &acc_loopinfo.acc_forloop[1];
+				FOR_LOOP_INFO* pForInfo2 = &acc_loopinfo.acc_forloop[2];
+				BOOL isLocated = FALSE;
+				//ACC_Locate_Reduction(&acc_loopinfo.acc_forloop[1]);
+				//locate where is the reduction statement.
+				//Scan Midder loop body
+				if(pForInfo1->wn_prehand_nodes)
+				{
+					isLocated = ACC_Locate_Reduction(pForInfo1->wn_prehand_nodes, 
+						old_st, reductionmap.ReductionOpr);
+				}
+				
+				if(!isLocated && pForInfo1->wn_afterhand_nodes)
+				{
+					isLocated = ACC_Locate_Reduction(pForInfo1->wn_afterhand_nodes, 
+						old_st, reductionmap.ReductionOpr);
+				}
+				if(isLocated)
+					reductionmap.acc_stmt_location = ACC_MIDDER_LOOP;
+				else 
+					reductionmap.acc_stmt_location = ACC_INNER_LOOP;
+
+				ST* st_reduction_buffer = acc_global_memory_for_reduction_host[mtypeID];
+
+				if(!st_reduction_buffer)
+				//////////////////////////////////////////////////////////////////
+				{
+					ST* st_num_vectors;
+					PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumVectors());
+					////////////////////////////////////////////////////////////////////////////////////
+					ACC_Host_Create_Preg_or_Temp(MTYPE_I4, "_total_num_of_vectors", &st_num_vectors);
+					ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
+					WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), rreg1, Return_Val_Preg, ST_type(st_num_vectors));
+					WN* temp_node = WN_Stid(TY_mtype(ST_type(st_num_vectors)), 0, 
+													st_num_vectors, ST_type(st_num_vectors), wn_return);
+					WN_INSERT_BlockLast( wn_replace_block, temp_node);
+
+					/////////////////////////////////////////////////////////////
+					WN* vector_num = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), 
+								0, st_num_vectors, ST_type(st_num_vectors));
+
+					///////////////////////////////////////////////////////////////////////
+					WN* alloc_size = WN_Binary(OPR_MPY, MTYPE_I4, WN_COPY_Tree(vector_num),
+							WN_Intconst(MTYPE_I4, TY_size(ST_type(reductionmap.hostName))));
+					//malloc device addr
+								
+					//reductionmap	
+					//ST *old_st = reductionmap.hostName;	
+				    TY_IDX ty = ST_type(old_st);
+				    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+				    char* localname = (char *) alloca(strlen(ST_name(old_st))+128);
+					sprintf ( localname, "__device_reduction_%s", ACC_Get_ScalarName_of_Reduction(mtypeID) );
+					TY_IDX ty_p = Make_Pointer_Type(ty);
+					ST *st_device = NULL;
+					//WN *device_addr = NULL;
+					st_device = New_ST( CURRENT_SYMTAB );
+					ST_Init(st_device,
+							Save_Str( localname ),
+							CLASS_VAR,
+							SCLASS_AUTO,
+							EXPORT_LOCAL,
+							ty_p);		
+					reductionmap.deviceName = st_device;
+					//call the acc malloc
+					WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
+					acc_global_memory_for_reduction_host[mtypeID] = st_device;
+				}
+				else
+					reductionmap.deviceName = st_reduction_buffer;
+				reductionmap.reduction_kenels = ACC_GenerateWorkerReduction_unrolling(&reductionmap);
+				acc_loopinfo.acc_forloop[1].reductionmap[iRdIdx] = reductionmap;
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				iRdIdx ++;
+			}
+			iRdIdx = 0;
+			while(iRdIdx<acc_loopinfo.acc_forloop[2].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[2].reductionmap[iRdIdx];
+				ST *old_st = reductionmap.hostName;
+				TY_IDX ty = ST_type(old_st);
+				TYPE_ID mtypeID = TY_mtype(ty);
+				reductionmap.looptype = acc_loopinfo.acc_forloop[2].looptype;
+				
+				ST* st_reduction_buffer = acc_global_memory_for_reduction_host[mtypeID];
+				//////////////////////////////////////////////////////////////////
+				if(!st_reduction_buffer)			
+				{
+					ST* st_num_vectors;
+					PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumVectors());
+					////////////////////////////////////////////////////////////////////////////////////
+					ACC_Host_Create_Preg_or_Temp(MTYPE_I4, "_total_num_of_vectors", &st_num_vectors);
+					ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
+					WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), rreg1, Return_Val_Preg, ST_type(st_num_vectors));
+					WN* temp_node = WN_Stid(TY_mtype(ST_type(st_num_vectors)), 0, 
+													st_num_vectors, ST_type(st_num_vectors), wn_return);
+					WN_INSERT_BlockLast( wn_replace_block, temp_node);
+
+					/////////////////////////////////////////////////////////////
+					WN* vector_num = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), 
+								0, st_num_vectors, ST_type(st_num_vectors));
+
+					///////////////////////////////////////////////////////////////////////
+					WN* alloc_size = WN_Binary(OPR_MPY, MTYPE_I4, WN_COPY_Tree(vector_num),
+							WN_Intconst(MTYPE_I4, TY_size(ST_type(reductionmap.hostName))));
+					//malloc device addr
+								
+					//reductionmap	
+					//ST *old_st = reductionmap.hostName;	
+				    TY_IDX ty = ST_type(old_st);
+				    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+				    char* localname = (char *) alloca(strlen(ST_name(old_st))+128);
+					sprintf ( localname, "__device_reduction_%s", ACC_Get_ScalarName_of_Reduction(mtypeID) );
+					TY_IDX ty_p = Make_Pointer_Type(ty);
+					ST *st_device = NULL;
+					//WN *device_addr = NULL;
+					st_device = New_ST( CURRENT_SYMTAB );
+					ST_Init(st_device,
+							Save_Str( localname ),
+							CLASS_VAR,
+							SCLASS_AUTO,
+							EXPORT_LOCAL,
+							ty_p);		
+					reductionmap.deviceName = st_device;
+					//call the acc malloc
+					WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
+					acc_global_memory_for_reduction_host[mtypeID] = st_device;
+				}
+				else
+					reductionmap.deviceName = st_reduction_buffer;
+				reductionmap.reduction_kenels = ACC_GenerateVectorReduction_unrolling(&reductionmap);
+				acc_loopinfo.acc_forloop[2].reductionmap[iRdIdx] = reductionmap;
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				iRdIdx ++;
+			}
+		}
+		else if(acc_loopinfo.loopnum == 2
+				&& acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx];
+				ST *old_st = reductionmap.hostName;
+				//Locate Reduction stmt
+				FOR_LOOP_INFO* pForInfo0 = &acc_loopinfo.acc_forloop[0];
+				FOR_LOOP_INFO* pForInfo1 = &acc_loopinfo.acc_forloop[1];
+				BOOL isLocated = FALSE;
+				reductionmap.looptype = pForInfo0->looptype;
+				//ACC_Locate_Reduction(&acc_loopinfo.acc_forloop[0]);
+				if(pForInfo0->wn_prehand_nodes)
+				{
+					isLocated = ACC_Locate_Reduction(pForInfo0->wn_prehand_nodes, 
+						old_st, reductionmap.ReductionOpr);
+				}
+				
+				if(!isLocated && pForInfo0->wn_afterhand_nodes)
+				{
+					isLocated = ACC_Locate_Reduction(pForInfo0->wn_afterhand_nodes, 
+						old_st, reductionmap.ReductionOpr);
+				}
+				if(isLocated)
+					reductionmap.acc_stmt_location = ACC_OUTTER_LOOP;
+				else 
+					reductionmap.acc_stmt_location = ACC_INNER_LOOP;
+				
+				ST* st_num_vectors;
+				PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
+				if(reductionmap.acc_stmt_location == ACC_INNER_LOOP)
+				{				
+					//call is present function to check whether it has already been created.
+					//each thread carries one buffer unit
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumVectors());
+					
+				}
+				else //if(reductionmap.acc_stmt_location == ACC_OUTTER_LOOP)
+				{				
+					if(pForInfo0->looptype == ACC_GANG)
+						//each gang carries one buffer unit
+						WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumGangs());
+					else if(pForInfo0->looptype == ACC_GANG_WORKER)
+						//each worker carries one buffer unit
+						WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumGangsWorkers());
+				}
+				ACC_Host_Create_Preg_or_Temp(MTYPE_I4, "_total_num_of_vectors", &st_num_vectors);
+				ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
+				WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), rreg1, Return_Val_Preg, ST_type(st_num_vectors));
+				WN* temp_node = WN_Stid(TY_mtype(ST_type(st_num_vectors)), 0, 
+												st_num_vectors, ST_type(st_num_vectors), wn_return);
+				WN_INSERT_BlockLast( wn_replace_block, temp_node);
+
+				/////////////////////////////////////////////////////////////
+				WN* vector_num = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), 
+							0, st_num_vectors, ST_type(st_num_vectors));
+
+				///////////////////////////////////////////////////////////////////////
+				WN* alloc_size = WN_Binary(OPR_MPY, MTYPE_I4, WN_COPY_Tree(vector_num),
+						WN_Intconst(MTYPE_I4, TY_size(ST_type(reductionmap.hostName))));
+				//malloc device addr
+							
+				//reductionmap	
+				//ST *old_st = reductionmap.hostName;	
+			    TY_IDX ty = ST_type(old_st);
+			    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+			    char* localname = (char *) alloca(strlen(ST_name(old_st))+128);
+				sprintf ( localname, "__device_reduction_%s", ST_name(old_st) );
+				TY_IDX ty_p = Make_Pointer_Type(ty);
+				ST *st_device = NULL;
+				//WN *device_addr = NULL;
+				st_device = New_ST( CURRENT_SYMTAB );
+				ST_Init(st_device,
+						Save_Str( localname ),
+						CLASS_VAR,
+						SCLASS_AUTO,
+						EXPORT_LOCAL,
+						ty_p);		
+				reductionmap.deviceName = st_device;
+				reductionmap.st_num_of_element = st_num_vectors;
+				//call the acc malloc
+				WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
+		
+				reductionmap.reduction_kenels = NULL;//ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
+				acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx] = reductionmap;				
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				iRdIdx ++;
+			}
+			iRdIdx = 0;
+			while(iRdIdx<acc_loopinfo.acc_forloop[1].reductionmap.size())
+			{
+				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[1].reductionmap[iRdIdx];
+				ST *old_st = reductionmap.hostName;
+				TY_IDX ty = ST_type(old_st);
+				TYPE_ID mtypeID = TY_mtype(ty);
+				reductionmap.looptype = acc_loopinfo.acc_forloop[1].looptype;
+
+				ST* st_reduction_buffer = acc_global_memory_for_reduction_host[mtypeID];
+
+				if(!st_reduction_buffer)
+				//////////////////////////////////////////////////////////////////
+				{
+					ST* st_num_vectors;
+					PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
+					WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumVectors());
+					////////////////////////////////////////////////////////////////////////////////////
+					ACC_Host_Create_Preg_or_Temp(MTYPE_I4, "_total_num_of_vectors", &st_num_vectors);
+					ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
+					WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), rreg1, Return_Val_Preg, ST_type(st_num_vectors));
+					WN* temp_node = WN_Stid(TY_mtype(ST_type(st_num_vectors)), 0, 
+													st_num_vectors, ST_type(st_num_vectors), wn_return);
+					WN_INSERT_BlockLast( wn_replace_block, temp_node);
+
+					/////////////////////////////////////////////////////////////
+					WN* vector_num = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), 
+								0, st_num_vectors, ST_type(st_num_vectors));
+
+					///////////////////////////////////////////////////////////////////////
+					WN* alloc_size = WN_Binary(OPR_MPY, MTYPE_I4, WN_COPY_Tree(vector_num),
+							WN_Intconst(MTYPE_I4, TY_size(ST_type(reductionmap.hostName))));
+					//malloc device addr
+								
+					//reductionmap	
+					//ST *old_st = reductionmap.hostName;	
+				    TY_IDX ty = ST_type(old_st);
+				    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+				    char* localname = (char *) alloca(strlen(ST_name(old_st))+128);
+					sprintf ( localname, "__device_reduction_%s", ACC_Get_ScalarName_of_Reduction(mtypeID) );
+					TY_IDX ty_p = Make_Pointer_Type(ty);
+					ST *st_device = NULL;
+					//WN *device_addr = NULL;
+					st_device = New_ST( CURRENT_SYMTAB );
+					ST_Init(st_device,
+							Save_Str( localname ),
+							CLASS_VAR,
+							SCLASS_AUTO,
+							EXPORT_LOCAL,
+							ty_p);		
+					reductionmap.deviceName = st_device;
+					//call the acc malloc
+					WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
+					acc_global_memory_for_reduction_host[mtypeID] = st_device;
+				}
+				else
+					reductionmap.deviceName = st_reduction_buffer;
+				//////////////////////////////////////////////////////////////////////////
+				if(reductionmap.looptype == ACC_VECTOR)
+					reductionmap.reduction_kenels = NULL; //ACC_GenerateVectorReduction_unrolling(&reductionmap);
+				else if(reductionmap.looptype == ACC_WORKER_VECTOR)
+					reductionmap.reduction_kenels = NULL; //ACC_GenerateWorkerVectorReduction_unrolling(&reductionmap);
+				///
+				acc_loopinfo.acc_forloop[1].reductionmap[iRdIdx] = reductionmap;				
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				iRdIdx ++;
+			}
+		}
+		else if(acc_loopinfo.loopnum == 1 
+				&& acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
+			{
+				//if(acc_loopinfo.acc_forloop[0].)			
+				PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
+				ST* st_num_vectors;
+				//call is present function to check whether it has already been created.
+				WN_INSERT_BlockLast( wn_replace_block, ACC_GenGetTotalNumVectors());
+				ACC_Host_Create_Preg_or_Temp(MTYPE_I4, "_total_num_of_vectors", &st_num_vectors);
+				ACC_GET_RETURN_PREGS(rreg1, rreg2, MTYPE_I4);
+				WN* wn_return = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), rreg1, Return_Val_Preg, ST_type(st_num_vectors));
+				WN* temp_node = WN_Stid(TY_mtype(ST_type(st_num_vectors)), 0, 
+												st_num_vectors, ST_type(st_num_vectors), wn_return);
+				WN_INSERT_BlockLast( wn_replace_block, temp_node);
+
+				WN* vector_num = WN_Ldid(TY_mtype(ST_type(st_num_vectors)), 
+						0, st_num_vectors, ST_type(st_num_vectors));
+
+				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx];
+				WN* alloc_size = WN_Binary(OPR_MPY, MTYPE_I4, WN_COPY_Tree(vector_num),
+							WN_Intconst(MTYPE_I4, TY_size(ST_type(reductionmap.hostName))));
+				//malloc device addr
+							
+				//reductionmap	
+				ST *old_st = reductionmap.hostName;	
+			    TY_IDX ty = ST_type(old_st);
+			    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+			    char* localname = (char *) alloca(strlen(ST_name(old_st))+128);
+				sprintf ( localname, "__device_reduction_%s", ST_name(old_st) );
+				TY_IDX ty_p = Make_Pointer_Type(ty);
+				ST *st_device = NULL;
+				//WN *device_addr = NULL;
+				st_device = New_ST( CURRENT_SYMTAB );
+				ST_Init(st_device,
+						Save_Str( localname ),
+						CLASS_VAR,
+						SCLASS_AUTO,
+						EXPORT_LOCAL,
+						ty_p);		
+				reductionmap.deviceName = st_device;
+				reductionmap.st_num_of_element = st_num_vectors;
+				//call the acc malloc
+				WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
+				reductionmap.looptype = acc_loopinfo.acc_forloop[0].looptype;
+				reductionmap.reduction_kenels = NULL; //ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
+				acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx] = reductionmap;				
+				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
+				iRdIdx ++;
+			}			
+			
+		}
+		
+		/***************************************************************************/
+		/***************************************************************************/
+		/***************************************************************************/
+		acc_parallel_loop_info.acc_loopinfo[i] = acc_loopinfo;
+		i++;
+	}
+}
+
 /*Including parallel construct region*/
 static void 
 Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
@@ -6097,58 +7323,18 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	ST *lock_st;
 
 	INT32 num_criticals;
-	BOOL is_omp, is_region;
+	BOOL is_region;
 	WN_PRAGMA_ID cur_id, end_id;
 	INT32 gate_construct_num;
 	int iKernelsCount = 0;
-	WN* wn_parallelBlock = WN_CreateBlock();
 	//PARALLEL_LOOP_INFO acc_parallel_loop_info;
 	acc_parallel_loop_info.acc_loopinfo.clear();
 	acc_parallel_loop_info.wn_prehand_nodes = NULL;
 	acc_parallel_loop_info.loopnum = 0;
-	
-    kernel_tmp_variable_count = 0;
-	
-	for (wn = pPRInfo->acc_param; wn; wn = WN_next(wn))
-	{
-	  kernel_parameters_count ++;
-	}
-	//reserve 256 slots for kernel tmp variables.
-	int ssize = (kernel_parameters_count + 256) * sizeof(ACC_VAR_TABLE);
-	acc_local_var_table = (ACC_VAR_TABLE *) alloca ( ssize );
-	BZERO ( acc_local_var_table, ssize );
-	
-	acc_psymtab = CURRENT_SYMTAB;
-	acc_ppuinfo = Current_PU_Info;
-	acc_pmaptab = Current_Map_Tab;
-	//outline
-	ACC_Push_Some_Globals( );
-    ACC_Create_MicroTask( PAR_FUNC_ACC_REGION, (void*)pPRInfo, TRUE);
-
-	//Create private data list
-	int iPivateCount = 0;
-	if(acc_private_nodes)
-	{
-		WN* wn_node = acc_private_nodes;
-	    char szlocalname[256];	  
-		for(; wn_node; wn_node=WN_next(wn_node))
-		{
-			ST* st_private = WN_st(wn_node);
-			TY_IDX index_ty = ST_type(st_private);
-		    ST* st_new_private = New_ST( CURRENT_SYMTAB );
-	    	sprintf ( szlocalname, "%s", ST_name(st_private));
-			ST_Init(st_new_private,
-		      Save_Str( szlocalname),
-		      CLASS_VAR,
-		      SCLASS_AUTO,
-		      EXPORT_LOCAL,
-		      index_ty);//Put this variables in local table
-			ACC_VAR_TABLE* v = acc_local_var_table + kernel_param.size() + iPivateCount;
-		    ACC_Create_Local_VariableTab(v, ACC_VAR_LOCAL, st_private, 0, st_new_private);	
-			iPivateCount ++;
-		}		
-	}
-
+		
+	acc_reduction_mem = ACC_RD_GLOBAL_MEM;
+	acc_reduction_rolling = ACC_RD_UNROLLING;
+	acc_reduction_exemode = ACC_RD_LAUNCH_KERNEL;
 	//Scan and translate the loop region. Attaching the general nodes as well.
 	for (cur_node = WN_first(tree); cur_node; cur_node = next_node) 
 	{
@@ -6168,10 +7354,7 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	       WN_pragma(WN_first(WN_region_pragmas(cur_node))) ==
 						WN_PRAGMA_ACC_LOOP_BEGIN) 
 		{
-
-			ACCP_process_type save_acct = acc_t;
 			acc_t = ACCP_LOOP_REGION;
-
 			//++num_constructs;
 			//generate kernel function
 			//This should be the first ACC LOOP
@@ -6179,8 +7362,16 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 			acc_loopinfo.acc_forloop.clear();
 			kernel_tmp_variable_count = 0;
 			ACC_Extract_ACC_LoopNest_Info(cur_node);
+			//verify the loop depth, all the depth should be the same.
+			if(acc_parallel_loop_info.loopnum 
+				&& acc_loopinfo.loopnum != acc_parallel_loop_info.acc_loopinfo[0].loopnum)
+			{
+				Fail_FmtAssertion ("ACC Loop depth should be exactly the same in parallel region. ");
+			}
+				
 			acc_parallel_loop_info.acc_loopinfo.push_back(acc_loopinfo);
 			acc_parallel_loop_info.loopnum ++;
+			acc_t = (ACCP_process_type)0;
 			
     	} 
 		else if(WN_opcode(cur_node) != OPC_REGION_EXIT)
@@ -6196,16 +7387,72 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 				if(acc_loopinfo.wn_following_nodes == NULL)
 					acc_loopinfo.wn_following_nodes = WN_CreateBlock();
 				WN_INSERT_BlockLast(acc_loopinfo.wn_following_nodes, cur_node);
-			}
-			
+			}			
 		}
 	}
+	//this function should be called before ACC_Create_MicroTask.
+	acc_reduction_tab_map.clear();
+	acc_additionalKernelLaunchParamList.clear();
+	///////////////////////////////////////////////////////////////////////////////////////////////
+	ACC_ProcessReduction_Parallel(pPRInfo, wn_replace_block);
+	///////////////////////////////////////////////////////////////////////////////////////////////
+	//create local var table map
+    kernel_tmp_variable_count = 0;
+	
+	for (wn = pPRInfo->acc_param; wn; wn = WN_next(wn))
+	{
+	  kernel_parameters_count ++;
+	}
+	//reserve 256 slots for kernel tmp variables.
+	//switch symtab
+	acc_psymtab = CURRENT_SYMTAB;
+	acc_ppuinfo = Current_PU_Info;
+	acc_pmaptab = Current_Map_Tab;
+	//outline
+	ACC_Push_Some_Globals( );
+	//create outline function
+    ACC_Create_MicroTask( PAR_FUNC_ACC_KERNEL, (void*)pPRInfo, TRUE);
+
+	st_shared_array_4parallelRegion = NULL;
+	WN* wn_parallelBlock = WN_CreateBlock();
+	//Create private data list
+	int iPivateCount = 0;
+	if(acc_private_nodes)
+	{
+		WN* wn_node = acc_private_nodes;
+	    char szlocalname[256];	  
+		for(; wn_node; wn_node=WN_next(wn_node))
+		{
+			ST* st_private = WN_st(wn_node);
+			
+			map<ST*, ACC_ReductionMap>::iterator itor = acc_reduction_tab_map.find(st_private);			
+			if(itor != acc_reduction_tab_map.end())
+				continue;
+			
+			TY_IDX index_ty = ST_type(st_private);
+		    ST* st_new_private = New_ST( CURRENT_SYMTAB );
+	    	sprintf ( szlocalname, "%s", ST_name(st_private));
+			ST_Init(st_new_private,
+		      Save_Str( szlocalname),
+		      CLASS_VAR,
+		      SCLASS_AUTO,
+		      EXPORT_LOCAL,
+		      index_ty);//Put this variables in local table
+			ACC_VAR_TABLE var;
+			var.has_offset = FALSE;
+			var.orig_st = st_private;
+			var.new_st = st_new_private;
+		    acc_local_new_var_map[st_private] = var;
+		}		
+	}
+
 	//Begin transform the loop
 	if(acc_parallel_loop_info.wn_prehand_nodes)
 	{
 		WN_INSERT_BlockLast(wn_parallelBlock, acc_parallel_loop_info.wn_prehand_nodes);
 		acc_parallel_loop_info.wn_prehand_nodes = NULL;
 	}
+	//Transformation
 	i = 0;
 	while(i < acc_parallel_loop_info.loopnum)
 	{
@@ -6218,17 +7465,12 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 
 	///////////////////////////////////////////////////////////////////////////////
 	ACC_Localize_Parent_Stack lps(FALSE, NULL);
-	ACC_Walk_and_Localize(wn_parallelBlock, acc_local_var_table, &lps);
+	ACC_Walk_and_Localize(wn_parallelBlock);
 	
 	WN_INSERT_BlockLast(acc_parallel_func, wn_parallelBlock);
 	
 	//launch kernels
 	//LaunchKernel(0, wn_replace_block, TRUE);
-
-	BZERO ( acc_local_var_table, ssize );
-		
-	
-	BZERO ( acc_local_var_table, ssize );
 		
 	ACC_Transfer_Maps ( acc_pmaptab, acc_cmaptab, acc_parallel_func, 
 		  PU_Info_regions_ptr(Current_PU_Info) );
@@ -6249,12 +7491,40 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	Current_Map_Tab = acc_pmaptab;
 	ACC_Pop_Some_Globals( );
 	
-	acc_local_var_table = NULL;
 	//setup the gangs and vectors
-	ACC_Setup_GPU_toplogy_parallel(pPRInfo, wn_replace_block);
+	//ACC_Setup_GPU_toplogy_parallel(pPRInfo, wn_replace_block);
 	//launch kernels
 	LaunchKernel(0, wn_replace_block, TRUE);
-
+	//launch reduction
+	
+	
+	i=0;
+	while(i < acc_parallel_loop_info.loopnum)
+	{
+		acc_loopinfo = acc_parallel_loop_info.acc_loopinfo[i];
+		/***************************************************************************/
+		/*************************Check the reduction here*****************************/
+		/***************************************************************************/
+		int iRdIdx;
+		//Only need to take care the top level reduction. Reduction operation in a single block will be handled
+		//in ACC_Transform_SingleForLoop. 
+		iRdIdx = 0;
+		while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
+		{
+			ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx];
+			ST *st_old = reductionmap.hostName;
+			ST *st_device = reductionmap.deviceName;
+			ST *st_reductionKernel = reductionmap.reduction_kenels;			
+			WN* wn_reduction_final_stmt = GenFinalReductionAlgorithm(st_device, st_old,
+				st_reductionKernel, reductionmap.st_num_of_element, TY_size(ST_type(st_old)));
+			WN_INSERT_BlockLast(wn_replace_block, wn_reduction_final_stmt);
+			iRdIdx ++;
+		}
+		/***************************************************************************/
+		/***************************************************************************/
+		/***************************************************************************/
+		i++;
+	}
 }
 
 
@@ -6284,9 +7554,8 @@ Transform_ACC_Kernel_Block ( WN * tree, KernelsRegionInfo* pKRInfo, WN* wn_repla
 	  kernel_parameters_count ++;
 	}
 	//reserve 256 slots for kernel tmp variables.
-	int ssize = (kernel_parameters_count + 256) * sizeof(ACC_VAR_TABLE);
-	acc_local_var_table = (ACC_VAR_TABLE *) alloca ( ssize );
-	BZERO ( acc_local_var_table, ssize );
+	//this function should be called before ACC_Create_MicroTask.
+	acc_reduction_tab_map.clear();
 
 	for (cur_node = WN_first(tree); cur_node; cur_node = next_node) 
 	{
@@ -6315,18 +7584,17 @@ Transform_ACC_Kernel_Block ( WN * tree, KernelsRegionInfo* pKRInfo, WN* wn_repla
 			//This should be the first ACC LOOP
 			acc_loopinfo.loopnum = 0;
 			acc_loopinfo.acc_forloop.clear();
-			kernel_tmp_variable_count = 0;
 			iKernelsCount ++;
 			ACC_Extract_ACC_LoopNest_Info(cur_node);
 			//Setup gangs and vectors before kernel launch
 			ACC_Setup_GPU_toplogy_kernels(wn_replace_block);
 			//Reduction process here, if there is a reduction algorithm
 			//Only the reduction across the whole gang and thread is supported at this time.
-			for(WN* wn_reduction = acc_loopinfo.acc_forloop[0].acc_reduction; wn_reduction; wn_reduction=WN_next(wn_reduction))
-			{
-				ACC_Process_SingleReductionNode(wn_reduction, 
-										wn_replace_block);
-			}
+			//for(WN* wn_reduction = acc_loopinfo.acc_forloop[0].acc_reduction; wn_reduction; wn_reduction=WN_next(wn_reduction))
+			//{
+			//	ACC_Process_SingleReductionNode(wn_reduction, 
+			//							wn_replace_block);
+			//}
 			
 			////////////////////////////////////////////////
 			ACC_Transform_MultiForLoop(pKRInfo);
@@ -6334,15 +7602,14 @@ Transform_ACC_Kernel_Block ( WN * tree, KernelsRegionInfo* pKRInfo, WN* wn_repla
 			LaunchKernel(iKernelsCount-1, wn_replace_block, FALSE);
 			//If there is some kind of reduction
 			i = 0;
-			while(i<acc_loopinfo.acc_forloop[0].reductionmap.size())
+			/*while(i<acc_loopinfo.acc_forloop[0].reductionmap.size())
 			{
 				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[i];
 				WN* wn_lauch_reduction = GenFinalReductionAlgorithm(reductionmap.deviceName, reductionmap.hostName,
 												reductionmap.reduction_kenels, GetKernelParamType(reductionmap.hostName));
 				WN_INSERT_BlockLast(wn_replace_block, wn_lauch_reduction);
 				i++;
-			}
-			BZERO ( acc_local_var_table, ssize );
+			}*/
 			//OK. Let's begin analysis
 			
 			//ACC_Process_ForLoop_InKernels( cur_node );
@@ -6379,7 +7646,6 @@ Transform_ACC_Kernel_Block ( WN * tree, KernelsRegionInfo* pKRInfo, WN* wn_repla
 			acc_t = save_acct;
     	} 
 	}
-	acc_local_var_table = NULL;
 }
 
 
@@ -6391,7 +7657,7 @@ Transform_ACC_Kernel_Block ( WN * tree, KernelsRegionInfo* pKRInfo, WN* wn_repla
     code was generated.  Accumulate code to allocate dynamic arrays in
     (*alloca_blockp).  */
 
-static void 
+/*static void 
 ACC_Create_Local_VariableTab ( ACC_VAR_TABLE * vtab, ACC_VAR_TYPE vtype, ST* old_st,
 						WN_OFFSET old_offset, ST* new_st)
 {	
@@ -6434,7 +7700,7 @@ ACC_Create_Local_VariableTab ( ACC_VAR_TABLE * vtab, ACC_VAR_TYPE vtype, ST* old
 	    v->new_offset = 0;
 	}
 	 
-}
+}*/
 
 /****************************************************/
 /*this following  two functions will be used in ACC_Walk_and_Localize*/
@@ -7258,7 +8524,7 @@ node of tree is not a load or store (e.g. it's a DO_LOOP or block), that
 root node will not be replaced.
 */
 static WN *
-ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stack * lps)
+ACC_Walk_and_Localize (WN * tree)
 {
   OPCODE op;
   OPERATOR opr;
@@ -7267,7 +8533,6 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
   WN *temp;
   ST *old_sym;
   WN_OFFSET old_offset;
-  ACC_VAR_TABLE *w;
 
   /* Ignore NULL subtrees. */
 
@@ -7281,52 +8546,29 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
 
   /* Look for and replace any nodes referencing localized symbols */
 
-  if (opr == OPR_LDID) {
+  if (opr == OPR_LDID) 
+  {
     old_sym = WN_st(tree);
     old_offset = WN_offsetx(tree);
-    for (w=vtab; w->orig_st; w++) {
-      if ((w->orig_st == old_sym) &&
-	  (w->has_offset ? (w->orig_offset == old_offset) : TRUE )) 
+	map<ST*, ACC_VAR_TABLE>::iterator itor = acc_local_new_var_map.find(old_sym);
+	if(itor != acc_local_new_var_map.end())	
+    //for (w=vtab; w->orig_st; w++) 
+	{
+	  ACC_VAR_TABLE newVar = itor->second;
+      if ((newVar.orig_st == old_sym) &&
+	  (newVar.has_offset ? (newVar.orig_offset == old_offset) : TRUE )) 
 	  {	
-	      if(w->vtype == ACC_VAR_GANG_REDUCTION)
-      	  {
-      	  	//acc_wn_reduction_index;
-      	  	int isize = TY_size(ST_type(old_sym));
-			//////////////////////////////////////////////////////////////////////////////////////
-	   		WN* wn_index = WN_Binary(OPR_MPY, 
-	   						TY_mtype(ST_type(WN_st(acc_wn_reduction_index))), 
-	   						WN_COPY_Tree(acc_wn_reduction_index), 
-	   						WN_Intconst(MTYPE_I4, isize));
-			WN* wn_LoadReductionArray = WN_Ldid(Pointer_type, 0, 
-									w->new_st, ST_type(w->new_st));
-			WN* wn_ptrLoc = WN_Binary(OPR_ADD, TY_mtype(ST_type(w->new_st)), 
-										wn_index, wn_LoadReductionArray);
-			//WN* wn_pre = WN_prev(tree);
-			//WN* wn_next = WN_next(tree);
-	  		tree = WN_Iload(TY_mtype(TY_pointed(ST_type(w->new_st))), 0, 
-							TY_pointed(ST_type(w->new_st)), wn_ptrLoc);
-			//WN_prev(tree) = wn_pre;
-			//if(wn_next)
-			//	WN_prev(wn_next) = tree;
-			//if(wn_pre)
-			//	WN_next(wn_pre) = tree;
-			//WN_next(tree) = wn_next;
-      	  }
-		  else
+  		  WN_st_idx(tree) = ST_st_idx(newVar.new_st);
+		  // for reduction of a field of STRUCT, the TY_kind would be different
+		  // And, we need to fix the TY for the wn, the field_id, and offsetx
+		  // As the local_xxx symbol is always .predef..., so field_id should be 0
+		  if (TY_kind(ST_type(newVar.new_st)) != TY_kind(WN_ty(tree)))
 		  {
-			  WN_st_idx(tree) = ST_st_idx(w->new_st);
-			  // for reduction of a field of STRUCT, the TY_kind would be different
-			  // And, we need to fix the TY for the wn, the field_id, and offsetx
-			  // As the local_xxx symbol is always .predef..., so field_id should be 0
-			  if (TY_kind(ST_type(w->new_st)) != TY_kind(WN_ty(tree)))
-			  {
-		        WN_set_ty(tree, ST_type(w->new_st));
-		    	WN_set_field_id(tree, 0);
-			  }
-			  if (w->has_offset)
-			    ACC_WN_set_offsetx(tree, w->new_offset);
-	      }
-		  break;
+	        WN_set_ty(tree, ST_type(newVar.new_st));
+	    	WN_set_field_id(tree, 0);
+		  }
+		  if (newVar.has_offset)
+		    ACC_WN_set_offsetx(tree, newVar.new_offset);
       }
     }
   }
@@ -7334,62 +8576,34 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
   {
     old_sym = WN_st(tree);
     old_offset = WN_offsetx(tree);
-    for (w=vtab; w->orig_st; w++) 
+	map<ST*, ACC_VAR_TABLE>::iterator itor = acc_local_new_var_map.find(old_sym);
+	if(itor != acc_local_new_var_map.end())	
+    //for (w=vtab; w->orig_st; w++) 
 	{
-      if ((w->vtree == NULL) &&
-	  		(w->orig_st == old_sym) &&
-	  		(w->has_offset ? (w->orig_offset == old_offset) : TRUE )) 
+	  ACC_VAR_TABLE newVar = itor->second;
+      if ((newVar.orig_st == old_sym) &&
+	  		(newVar.has_offset ? (newVar.orig_offset == old_offset) : TRUE )) 
 	  {
-	      if(w->vtype == ACC_VAR_GANG_REDUCTION)
-      	  {
-      	  	//acc_wn_reduction_index;
-      	  	int isize = TY_size(ST_type(old_sym));
-			//////////////////////////////////////////////////////////////////////////////////////
-	   		WN* wn_index = WN_Binary(OPR_MPY, 
-	   						TY_mtype(ST_type(WN_st(acc_wn_reduction_index))), 
-	   						WN_COPY_Tree(acc_wn_reduction_index), 
-	   						WN_Intconst(MTYPE_I4, isize));
-			WN* wn_LoadReductionArray = WN_Ldid(Pointer_type, 0, 
-									w->new_st, ST_type(w->new_st));
-			WN* wn_ptrLoc = WN_Binary(OPR_ADD, TY_mtype(ST_type(w->new_st)), 
-										wn_index, wn_LoadReductionArray);
-			
-			WN* wn_pre = WN_prev(tree);
-			WN* wn_next = WN_next(tree);
-	  		tree = WN_Istore(TY_mtype(TY_pointed(ST_type(w->new_st))), 0, ST_type(w->new_st), 
-					wn_ptrLoc, WN_kid(tree, 0));
-			WN_prev(tree) = wn_pre;
-			if(wn_next)
-				WN_prev(wn_next) = tree;
-			if(wn_pre)
-				WN_next(wn_pre) = tree;
-			WN_next(tree) = wn_next;
-      	  }
-		  else
-		  {
-			WN_st_idx(tree) = ST_st_idx(w->new_st);
-			if (TY_kind(ST_type(w->new_st)) != TY_kind(WN_ty(tree)))
-			{
-					WN_set_ty(tree, ST_type(w->new_st));
-					WN_set_field_id(tree, 0);
-			}
-			if (w->has_offset)
-					ACC_WN_set_offsetx(tree, w->new_offset);
-			
-		  }
-		break;
+		WN_st_idx(tree) = ST_st_idx(newVar.new_st);
+		if (TY_kind(ST_type(newVar.new_st)) != TY_kind(WN_ty(tree)))
+		{
+				WN_set_ty(tree, ST_type(newVar.new_st));
+				WN_set_field_id(tree, 0);
+		}
+		if (newVar.has_offset)
+				ACC_WN_set_offsetx(tree, newVar.new_offset);	
       }
     }
   } 
-  else if (opr == OPR_ILOAD) 
+  /*else if (opr == OPR_ILOAD) 
   {
     for (w=vtab; w->orig_st; w++) 
 	{
-      if ((w->vtree && (WN_ACC_Compare_Trees(w->vtree, WN_kid0(tree)) == 0)) ||
-	  (w->vtreex && (WN_ACC_Compare_Trees(w->vtreex, WN_kid0(tree)) == 0))) 
+      if ((newVar.vtree && (WN_ACC_Compare_Trees(newVar.vtree, WN_kid0(tree)) == 0)) ||
+	  (newVar.vtreex && (WN_ACC_Compare_Trees(newVar.vtreex, WN_kid0(tree)) == 0))) 
 	  {
-		temp = WN_RLdid ( Promote_Type(w->mtype), w->mtype, w->new_offset,
-			  w->new_st, w->ty );
+		temp = WN_RLdid ( Promote_Type(newVar.mtype), newVar.mtype, newVar.new_offset,
+			  newVar.new_st, newVar.ty );
 #ifdef KEY // bug 10707: honor the type in the original tree node
 		if (WN_rtype(tree) == MTYPE_F8 && WN_rtype(temp) == MTYPE_C8 ||
 		    WN_rtype(tree) == MTYPE_F4 && WN_rtype(temp) == MTYPE_C4) 
@@ -7407,17 +8621,17 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
     }
 #ifdef KEY
     if (opr == OPR_ILOAD)  // There was no match above
-      WN_kid0(tree) = ACC_Walk_and_Localize ( WN_kid0(tree), vtab, lps);
+      WN_kid0(tree) = ACC_Walk_and_Localize ( WN_kid0(tree));
 #endif // KEY
-  }
-  else if (opr == OPR_ISTORE) 
+  }*/
+  /*else if (opr == OPR_ISTORE) 
   {
     for (w=vtab; w->orig_st; w++) 
 	{
-      if ((w->vtree && (WN_ACC_Compare_Trees(w->vtree, WN_kid1(tree)) == 0)) ||
-	  (w->vtreex && (WN_ACC_Compare_Trees(w->vtreex, WN_kid1(tree)) == 0))) 
+      if ((newVar.vtree && (WN_ACC_Compare_Trees(newVar.vtree, WN_kid1(tree)) == 0)) ||
+	  (newVar.vtreex && (WN_ACC_Compare_Trees(newVar.vtreex, WN_kid1(tree)) == 0))) 
 	  {
-		temp = WN_Stid ( w->mtype, w->new_offset, w->new_st, w->ty,
+		temp = WN_Stid ( newVar.mtype, newVar.new_offset, newVar.new_st, newVar.ty,
 			 WN_kid0(tree) );
 #ifdef KEY // bug 10707: honor the type in the original tree node
 		if (WN_desc(tree) == MTYPE_F8 && WN_desc(temp) == MTYPE_C8 ||
@@ -7443,7 +8657,7 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
     }
     // PV 600983: don't translate labels (or exception regions) inside
     // orphaned constructs
-  }
+  }*/
   else if (opr == OPR_ARRAY && WN_num_dim(tree)>1) 
   {
   	int idim = WN_num_dim(tree);
@@ -7456,112 +8670,112 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
 	UINT32 esize = WN_element_size(tree);
 	TY_IDX ty = ACC_Get_ElementTYForMultiArray(WN_st(wn_base));
 	
-    for (w=vtab; w->orig_st; w++) 
-	{
-      if ((w->orig_st == old_sym)) 
-	  {	
-	  	new_sym = w->new_st;
-		break;
-      }
-    }
-	//WN_num_dim
-	//WN_array_dim(x,i)
-	//WN_array_index(x, i)
-	if(new_sym)
-	{
-		for(ii=0; ii<idim-1; ii++)
-		{
-			WN* wn_index = WN_array_index(tree, ii);
-			//TY_IDX idx_ty = WN_rtype(wn_index);
-			//if(WN_has_sym(wn_index))
-			//	idx_ty = TY_mtype(ST_type(WN_st(wn_index)));
-			//else
-			//	Is_True(WN_has_sym(wn_index), ("WN_st: wn doesn't have ST field"));
-			wn_index = WN_COPY_Tree(wn_index);
-			int iii = ii;
-			while(iii<idim-1)
-			{
-				WN* wn_dim = WN_array_dim(tree, iii+1);
-		   		wn_index = WN_Binary(OPR_MPY, 
-		   						WN_rtype(wn_index), 
-		   						wn_index, 
-		   						WN_COPY_Tree(wn_dim));
-				iii ++;
-			}
-			if(wn_offset)
-	   			wn_offset = WN_Binary(OPR_ADD, 
-		   					WN_rtype(wn_index), 
-	   						wn_offset, 
-	   						wn_index);
-			else
-				wn_offset = wn_index;
-			if(wn_dimInOne == NULL)
-				wn_dimInOne = WN_Binary(OPR_MPY, 
-		   					WN_rtype(wn_index), 
-		   						WN_COPY_Tree(WN_array_dim(tree, ii)), 
-		   						WN_COPY_Tree(WN_array_dim(tree, ii+1)));
-			else
-				wn_dimInOne = WN_Binary(OPR_MPY, 
-		   					WN_rtype(wn_index), 
-		   						wn_dimInOne, 
-		   						WN_COPY_Tree(WN_array_dim(tree, ii+1)));
-		}
-		WN* wn_index = WN_array_index(tree, ii);
-		if(wn_offset)
-			wn_offset = WN_Binary(OPR_ADD, 
-		   				WN_rtype(wn_index), 
-						WN_COPY_Tree(wn_index), 
-						wn_offset);
-		else
-			wn_offset = WN_COPY_Tree(wn_index);
-		wn_offset = WN_Binary(OPR_MPY, 
-					MTYPE_U4, 
-					wn_offset, 
-					WN_Intconst(MTYPE_U4, TY_size(ty)));
-		//wnx = WN_Lda( Pointer_type, 0, new_sym);
-		//Set_TY_align(ST_type(new_sym), 4);
-		WN* wn_ldidbase = WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
-		//WN_Lda( Pointer_type, 0, new_sym);
-		//WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
-		WN* newtree = WN_Binary(OPR_ADD, 
-					MTYPE_U4, 
-					wn_offset, 
-					wn_ldidbase);
-		//WN_prev(newtree) = WN_prev(tree);
-		//WN_next(newtree) = WN_next(tree);
-		//WN* newtree = ACC_Make_Array_ref(new_sym, wn_offset, wn_dimInOne);
-		WN_DELETE_Tree(tree);
-		tree = (newtree);
-	}
+	map<ST*, ACC_VAR_TABLE>::iterator itor = acc_local_new_var_map.find(old_sym);
 	
+	if(itor != acc_local_new_var_map.end())	
+    //for (w=vtab; w->orig_st; w++) 
+	{
+	  	ACC_VAR_TABLE newVar = itor->second;
+		//WN_num_dim
+		//WN_array_dim(x,i)
+		//WN_array_index(x, i)
+		if(new_sym)
+		{
+			for(ii=0; ii<idim-1; ii++)
+			{
+				WN* wn_index = WN_array_index(tree, ii);
+				//TY_IDX idx_ty = WN_rtype(wn_index);
+				//if(WN_has_sym(wn_index))
+				//	idx_ty = TY_mtype(ST_type(WN_st(wn_index)));
+				//else
+				//	Is_True(WN_has_sym(wn_index), ("WN_st: wn doesn't have ST field"));
+				wn_index = WN_COPY_Tree(wn_index);
+				int iii = ii;
+				while(iii<idim-1)
+				{
+					WN* wn_dim = WN_array_dim(tree, iii+1);
+			   		wn_index = WN_Binary(OPR_MPY, 
+			   						WN_rtype(wn_index), 
+			   						wn_index, 
+			   						WN_COPY_Tree(wn_dim));
+					iii ++;
+				}
+				if(wn_offset)
+		   			wn_offset = WN_Binary(OPR_ADD, 
+			   					WN_rtype(wn_index), 
+		   						wn_offset, 
+		   						wn_index);
+				else
+					wn_offset = wn_index;
+				if(wn_dimInOne == NULL)
+					wn_dimInOne = WN_Binary(OPR_MPY, 
+			   					WN_rtype(wn_index), 
+			   						WN_COPY_Tree(WN_array_dim(tree, ii)), 
+			   						WN_COPY_Tree(WN_array_dim(tree, ii+1)));
+				else
+					wn_dimInOne = WN_Binary(OPR_MPY, 
+			   					WN_rtype(wn_index), 
+			   						wn_dimInOne, 
+			   						WN_COPY_Tree(WN_array_dim(tree, ii+1)));
+			}
+			WN* wn_index = WN_array_index(tree, ii);
+			if(wn_offset)
+				wn_offset = WN_Binary(OPR_ADD, 
+			   				WN_rtype(wn_index), 
+							WN_COPY_Tree(wn_index), 
+							wn_offset);
+			else
+				wn_offset = WN_COPY_Tree(wn_index);
+			wn_offset = WN_Binary(OPR_MPY, 
+						MTYPE_U4, 
+						wn_offset, 
+						WN_Intconst(MTYPE_U4, TY_size(ty)));
+			//wnx = WN_Lda( Pointer_type, 0, new_sym);
+			//Set_TY_align(ST_type(new_sym), 4);
+			WN* wn_ldidbase = WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
+			//WN_Lda( Pointer_type, 0, new_sym);
+			//WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
+			WN* newtree = WN_Binary(OPR_ADD, 
+						MTYPE_U4, 
+						wn_offset, 
+						wn_ldidbase);
+			//WN_prev(newtree) = WN_prev(tree);
+			//WN_next(newtree) = WN_next(tree);
+			//WN* newtree = ACC_Make_Array_ref(new_sym, wn_offset, wn_dimInOne);
+			WN_DELETE_Tree(tree);
+			tree = (newtree);
+		}
+   }
   }
   else if (OPCODE_has_sym(op) && WN_st(tree)) 
   {
     old_sym = WN_st(tree);
     old_offset = OPCODE_has_offset(op) ? WN_offsetx(tree) : 0;
-    for (w=vtab; w->orig_st; w++) 
+	
+	map<ST*, ACC_VAR_TABLE>::iterator itor = acc_local_new_var_map.find(old_sym);
+	
+	if(itor != acc_local_new_var_map.end())	
 	{
-      if ((w->vtype != ACC_VAR_GANG_REDUCTION) &&
-	  		(w->orig_st == old_sym) &&
-	  		(w->has_offset ? (w->orig_offset == old_offset) : TRUE )) 
-	  {
-		WN_st_idx(tree) = ST_st_idx(w->new_st);
-		if (OPCODE_has_offset(op) && w->has_offset)
-		  ACC_WN_set_offsetx(tree, w->new_offset);
-		break;
-      }
-    }
+	  	ACC_VAR_TABLE newVar = itor->second;
+	    //for (w=vtab; w->orig_st; w++) 
+	      if ((newVar.orig_st == old_sym) &&
+		  		(newVar.has_offset ? (newVar.orig_offset == old_offset) : TRUE )) 
+		  {
+			WN_st_idx(tree) = ST_st_idx(newVar.new_st);
+			if (OPCODE_has_offset(op) && newVar.has_offset)
+			  ACC_WN_set_offsetx(tree, newVar.new_offset);
+	      }
+	}
   }
 
   /* Walk all children */
 
-  lps->Push(tree);
   if (op == OPC_BLOCK) 
   {
     r = WN_first(tree);
     while (r) 
 	{ // localize each node in block
-      r = ACC_Walk_and_Localize ( r, vtab, lps);
+      r = ACC_Walk_and_Localize ( r);
       if (WN_prev(r) == NULL)
         WN_first(tree) = r;
       if (WN_next(r) == NULL)
@@ -7575,11 +8789,9 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
   {
     for (i=0; i < WN_kid_count(tree); i++)
     {
-      WN_kid(tree, i) = ACC_Walk_and_Localize ( WN_kid(tree, i), vtab, lps);
+      WN_kid(tree, i) = ACC_Walk_and_Localize ( WN_kid(tree, i));
     }
   }
-  lps->Pop();
-
   return (tree);
 }   
 
@@ -7589,50 +8801,8 @@ ACC_Walk_and_Localize (WN * tree, ACC_VAR_TABLE * vtab, ACC_Localize_Parent_Stac
   *  single GPU kernel will be generated in this region */
 /***************************************************************/
 static void ACC_Handle_Parallel_Loops( WN* stmt_block, ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
-{
-  WN *regionarg_firstprivate_block = NULL;
-  WN *wn, *reduction_init_block = NULL, *reduction_store_block = NULL;
-
-  /* Initialization. */
-
-  //acc_psymtab = CURRENT_SYMTAB;
-  //acc_ppuinfo = Current_PU_Info;
-  //acc_pmaptab = Current_Map_Tab;
-
-  /* Strip any nested mp stuff due to inlining. */
-
-  // Gather STs for inner scope VLAs
-
-  //ACC_Gather_Inner_Scope_Vlas ( acc_stmt_block );
-
-  /* Create and initialize all parent temps that will be needed. */
-
-  //Process_Preg_Temps ( acc_stmt_block, TRUE );
-
-
-  //ACC_Push_Some_Globals( );
-  //ACC_Create_MicroTask( PAR_FUNC_ACC_REGION );
-  //Delayed_MP_Translation( acc_stmt_block );
-  //Init parameter table
-  
+{  
   Transform_ACC_Parallel_Block(stmt_block, pPRInfo, wn_replace_block);
-  
-  //acc_local_var_table = NULL;
-  //Do something here to tranform the loop body: 
-  //remove the loop and leave the loop body;
-  //use the block /thread info in cuda;
-  //WN_INSERT_BlockLast ( acc_parallel_func, acc_stmt_block );
-	
-  
-
-  /* Restore parent information. */
-  
-  //CURRENT_SYMTAB = acc_psymtab;
-  //Current_PU_Info = acc_ppuinfo;
-  //Current_pu = &Current_PU_Info_pu();
-  //Current_Map_Tab = acc_pmaptab;
-  //ACC_Pop_Some_Globals( );
-
 } // Process_ACC_Region()
 
 
@@ -7643,49 +8813,7 @@ static void ACC_Handle_Parallel_Loops( WN* stmt_block, ParallelRegionInfo* pPRIn
 /***************************************************************/
 static void ACC_Handle_Kernels_Loops( WN* stmt_block, KernelsRegionInfo* pKRInfo, WN* wn_replace_block)
 {
-  WN *regionarg_firstprivate_block = NULL;
-  WN *wn, *reduction_init_block = NULL, *reduction_store_block = NULL;
-
-  /* Initialization. */
-
-  //acc_psymtab = CURRENT_SYMTAB;
-  //acc_ppuinfo = Current_PU_Info;
-  //acc_pmaptab = Current_Map_Tab;
-
-  /* Strip any nested mp stuff due to inlining. */
-
-  // Gather STs for inner scope VLAs
-
-  //ACC_Gather_Inner_Scope_Vlas ( acc_stmt_block );
-
-  /* Create and initialize all parent temps that will be needed. */
-
-  //Process_Preg_Temps ( acc_stmt_block, TRUE );
-
-
-  //ACC_Push_Some_Globals( );
-  //ACC_Create_MicroTask( PAR_FUNC_ACC_REGION );
-  //Delayed_MP_Translation( acc_stmt_block );
-  //Init parameter table
-  
   Transform_ACC_Kernel_Block(stmt_block, pKRInfo, wn_replace_block);
-  
-  //acc_local_var_table = NULL;
-  //Do something here to tranform the loop body: 
-  //remove the loop and leave the loop body;
-  //use the block /thread info in cuda;
-  //WN_INSERT_BlockLast ( acc_parallel_func, acc_stmt_block );
-	
-  
-
-  /* Restore parent information. */
-  
-  //CURRENT_SYMTAB = acc_psymtab;
-  //Current_PU_Info = acc_ppuinfo;
-  //Current_pu = &Current_PU_Info_pu();
-  //Current_Map_Tab = acc_pmaptab;
-  //ACC_Pop_Some_Globals( );
-
 } // Process_ACC_Region()
 
 static WN *LaunchKernel (int index, WN* wn_replace_block, BOOL bParallel)
@@ -8132,7 +9260,7 @@ static WN* ACC_GenIsPCreate(ACC_DREGION__ENTRY dEntry)
 	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
 		wnAddr = WN_Lda( Pointer_type, 0, old_st);
   	else
-		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
 	
 	WN * wn;
 	wn = WN_Create(OPC_I4CALL, 4 );
@@ -8156,106 +9284,6 @@ static WN* ACC_GenIsPCreate(ACC_DREGION__ENTRY dEntry)
 	
 	return wn;
 }
-/*
-static WN* ACC_GenIsPCopy(WN* node)
-{
-	WN* wnSize = ACC_GetArraySize(node);
-	WN* wnStart = ACC_GetArrayStart(node);
-	ST *old_st = WN_st(node);
-	
-	WN* wnAddr;
-	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
-		wnAddr = WN_Lda( Pointer_type, 0, old_st);
-  	else
-		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
-	
-	WN * wn;
-	wn = WN_Create(OPC_VCALL, 3 );
-	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_PRESENT_COPY);
-
-	WN_Set_Call_Non_Data_Mod(wn);
-	WN_Set_Call_Non_Data_Ref(wn);
-	WN_Set_Call_Non_Parm_Mod(wn);
-	WN_Set_Call_Non_Parm_Ref(wn);
-	WN_Set_Call_Parm_Ref(wn);
-	WN_linenum(wn) = acc_line_number;
-
-	//wnx = WN_Lda( Pointer_type, 0, Src);
-	WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnAddr, WN_ty(wnAddr), WN_PARM_BY_VALUE);  
-	
-	WN_kid(wn, 1) = WN_CreateParm(MTYPE_I4, wnStart, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
-
-	WN_kid(wn, 2) = WN_CreateParm(MTYPE_I4, wnSize, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
-	
-	return wn;
-}
-
-static WN* ACC_GenIsPCopyIn(WN* node)
-{
-	WN* wnSize = ACC_GetArraySize(node);
-	WN* wnStart = ACC_GetArrayStart(node);
-	ST *old_st = WN_st(node);
-	
-	WN* wnAddr;
-	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
-		wnAddr = WN_Lda( Pointer_type, 0, old_st);
-  	else
-		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
-	
-	WN * wn;
-	wn = WN_Create(OPC_VCALL, 3 );
-	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_PRESENT_COPYIN);
-
-	WN_Set_Call_Non_Data_Mod(wn);
-	WN_Set_Call_Non_Data_Ref(wn);
-	WN_Set_Call_Non_Parm_Mod(wn);
-	WN_Set_Call_Non_Parm_Ref(wn);
-	WN_Set_Call_Parm_Ref(wn);
-	WN_linenum(wn) = acc_line_number;
-
-	//wnx = WN_Lda( Pointer_type, 0, Src);
-	WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnAddr, WN_ty(wnAddr), WN_PARM_BY_VALUE);  
-	
-	WN_kid(wn, 1) = WN_CreateParm(MTYPE_I4, wnStart, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
-
-	WN_kid(wn, 2) = WN_CreateParm(MTYPE_I4, wnSize, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
-	
-	return wn;
-}
-
-static WN* ACC_GenIsPCopyOut(WN* node)
-{	
-	WN* wnSize = ACC_GetArraySize(node);
-	WN* wnStart = ACC_GetArrayStart(node);
-	ST *old_st = WN_st(node);
-	
-  	
-	WN* wnAddr;
-	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
-		wnAddr = WN_Lda( Pointer_type, 0, old_st);
-  	else
-		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
-	
-	WN * wn;
-	wn = WN_Create(OPC_VCALL, 3 );
-	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_PRESENT_COPYOUT);
-
-	WN_Set_Call_Non_Data_Mod(wn);
-	WN_Set_Call_Non_Data_Ref(wn);
-	WN_Set_Call_Non_Parm_Mod(wn);
-	WN_Set_Call_Non_Parm_Ref(wn);
-	WN_Set_Call_Parm_Ref(wn);
-	WN_linenum(wn) = acc_line_number;
-
-	//wnx = WN_Lda( Pointer_type, 0, Src);
-	WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnAddr, WN_ty(wnAddr), WN_PARM_BY_VALUE);  
-	
-	WN_kid(wn, 1) = WN_CreateParm(MTYPE_I4, wnStart, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
-
-	WN_kid(wn, 2) = WN_CreateParm(MTYPE_I4, wnSize, Be_Type_Tbl(MTYPE_I4), WN_PARM_BY_VALUE);
-	
-	return wn;
-}*/
 
 //ACCR_GET_DEVICE_ADDR
 static ST* ACC_GenDeclareSingleDeviceMem(ACC_DREGION__ENTRY dentry, 
@@ -8317,7 +9345,7 @@ static WN* ACC_Gen_GetDeviceAddr(ACC_DREGION__ENTRY dentry, ST* st_device)
 	if(TY_kind(ST_type(old_st)) == KIND_ARRAY)
 		wnAddr = WN_Lda( Pointer_type, 0, old_st);
   	else
-		wnAddr = WN_Ldid(Pointer_type, 0, old_st, Be_Type_Tbl(Pointer_type));
+		wnAddr = WN_Ldid(Pointer_type, 0, old_st, ST_type(old_st));
 	
 	WN * wn;
 	WN * wnx;
@@ -8354,7 +9382,7 @@ static void ACC_GenPresentNode(vector<ACC_DREGION__ENTRY>* pDREntries, vector<AC
 	if(!is_pcreate_tmp_created)
 	{
 		ACC_Host_Create_Preg_or_Temp( MTYPE_I4, "_is_pcreate",
-	                  &st_is_pcreate, &ofst_st_is_pcreate);
+	                  &st_is_pcreate);
 		is_pcreate_tmp_created = TRUE;
 	}
 	
@@ -8406,7 +9434,7 @@ static void ACC_GenDeviceCreateCopyInOut(vector<ACC_DREGION__ENTRY>* pDREntries,
 	if(!is_pcreate_tmp_created)
 	{
 		ACC_Host_Create_Preg_or_Temp( MTYPE_I4, "_is_pcreate",
-	                  &st_is_pcreate, &ofst_st_is_pcreate);
+	                  &st_is_pcreate);
 		is_pcreate_tmp_created = TRUE;
 	}
 	
@@ -8532,7 +9560,7 @@ static WN* ACC_GenUpdateHostVar(ST* st_Var, WN* wn_start, WN* wn_length)
   if(TY_kind(ST_type(st_Var)) == KIND_ARRAY)
 	wnx = WN_Lda( Pointer_type, 0, st_Var);
   else
-	wnx = WN_Ldid(Pointer_type, 0, st_Var, Be_Type_Tbl(Pointer_type));
+	wnx = WN_Ldid(Pointer_type, 0, st_Var, ST_type(st_Var));
 
   //wnx = WN_Lda( Pointer_type, 0, Src);
   WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
@@ -8574,7 +9602,7 @@ static WN* ACC_GenUpdateDeviceVar(ST* st_Var, WN* wn_start, WN* wn_length)
   if(TY_kind(ST_type(st_Var)) == KIND_ARRAY)
 	wnx = WN_Lda( Pointer_type, 0, st_Var);
   else
-	wnx = WN_Ldid(Pointer_type, 0, st_Var, Be_Type_Tbl(Pointer_type));
+	wnx = WN_Ldid(Pointer_type, 0, st_Var, ST_type(st_Var));
 
   //wnx = WN_Lda( Pointer_type, 0, Src);
   WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
@@ -9478,6 +10506,7 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	WN* wn;
 	
 	WN* kernelsBlock = WN_CreateBlock();
+	acc_reduction_count = 0;
 	//ignore if, present, deviceptr clauses
 	kernelsRegionInfo.acc_if_node = acc_if_node;
 	//sDRegionInfo.acc_copy_nodes = acc_copy_nodes; 	  /* Points to (optional) copy nodes */
@@ -9575,21 +10604,21 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	acc_dregion_fprivate.clear();
 	//Handling the data analysis	
 	
-		  	  //Generating kernel parameter lists from in/out chain
-		  	  /*ACC_Region_DefUseAnalysis(wn_stmt_block, &acc_pHeadLiveness);
-			  ACC_Region_LivenessAnalysis_cont(wn_cont_nodes, acc_pHeadLiveness);
-			  i = acc_nested_dregion_info.Depth - 1;
-			  while(i>=0)
-		  	  {
-		  	  	SingleDRegionInfo sDRegionInfo = 
-  					acc_nested_dregion_info.DRegionInfo[i];
-				ACC_Region_LivenessAnalysis_cont(sDRegionInfo.wn_cont_nodes, acc_pHeadLiveness);
-				i--;
-		  	  }
-			  ACC_Finalize_Liveness_Chain(acc_pHeadLiveness);
-			  ACC_Retrieve_Kernel_Param_From_Liveness(acc_pHeadLiveness);
-			  ACC_Dump_InOutAnalysis(acc_pHeadLiveness);
-			  ACC_Free_DefUse_Chain(&acc_pHeadLiveness);*/
+	//Generating kernel parameter lists from in/out chain
+	/*ACC_Region_DefUseAnalysis(wn_stmt_block, &acc_pHeadLiveness);
+	ACC_Region_LivenessAnalysis_cont(wn_cont_nodes, acc_pHeadLiveness);
+	i = acc_nested_dregion_info.Depth - 1;
+	while(i>=0)
+	{
+		SingleDRegionInfo sDRegionInfo = 
+		acc_nested_dregion_info.DRegionInfo[i];
+	ACC_Region_LivenessAnalysis_cont(sDRegionInfo.wn_cont_nodes, acc_pHeadLiveness);
+	i--;
+	}
+	ACC_Finalize_Liveness_Chain(acc_pHeadLiveness);
+	ACC_Retrieve_Kernel_Param_From_Liveness(acc_pHeadLiveness);
+	ACC_Dump_InOutAnalysis(acc_pHeadLiveness);
+	ACC_Free_DefUse_Chain(&acc_pHeadLiveness);*/
 	//Generating kernel parameter lists from in/out chain
 	ACC_Region_DefUseAnalysis(tree, &acc_pHeadLiveness, &kernelsRegionInfo, TRUE);
 	ACC_Region_LivenessAnalysis_cont(wn_cont, acc_pHeadLiveness);
@@ -9912,6 +10941,8 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	acc_dregion_device.clear();
 	acc_dregion_private.clear();
 	acc_dregion_fprivate.clear();
+	acc_local_new_var_map.clear();
+	acc_reduction_count = 0;
 	
 	//Generating kernel parameter lists from in/out chain
 	ACC_Region_DefUseAnalysis(tree, &acc_pHeadLiveness, &parallelRegionInfo, FALSE);
@@ -9935,6 +10966,7 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	acc_kernelLaunchParamList.clear();
 	ACC_Generate_KernelParameters(acc_parms_nodes, (void*)&parallelRegionInfo, FALSE);
     //multi kernels and multi loopnest process
+    ACC_Setup_GPU_toplogy_parallel(&parallelRegionInfo, parallelBlock);
     ACC_Handle_Parallel_Loops(tree, &parallelRegionInfo, parallelBlock);
 	acc_kernel_functions_st.clear();
 	//Generate the kernel launch function.
@@ -10358,7 +11390,7 @@ static ST* st_input_data;
 static ST* st_output_data;
 static ST* st_num_elem;
 static ST* st_blocksize;
-static ST* st_isPow2;
+//static ST* st_isPow2;
 /*****************************************/
 //This function is only called by ACC_Create_Reduction_Kernels  function.
 static void Create_reduction_kernel_st_params(ST* st_reduction)
@@ -10429,19 +11461,44 @@ static void Create_reduction_kernel_st_params(ST* st_reduction)
 			Be_Type_Tbl(MTYPE_U4));
 	Set_ST_is_value_parm( karg );
 	st_blocksize = karg;
-	//delcare "blocksize", 
-	sprintf ( localname, "is_power2");
+
+}
+
+
+//This function is only called by ACC_Create_Reduction_vector/worker/workervector  function.
+static void Create_reduction_device_st_params(ST* st_reduction)
+{	
+	//reduction_kernel_param.clear();
+	
+	WN* wn;
+	//this var may be deleted later.it is useless.
+	ACC_VAR_TYPE vtype = ACC_VAR_COPYIN;			
+	TY_IDX ty = ST_type(st_reduction);
+	TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+	if (kind != KIND_SCALAR)
+    	Fail_FmtAssertion("Create_reduction_kernel_st_params: invalid OpenACC reduction type. It must be scalar variables.");
+	
+	char* localname = (char *) alloca(strlen(ST_name(st_reduction))+20);
+
+	//declare in buffer
+	sprintf ( localname, "sdata_%s", ST_name(st_reduction) );
+
+	//This is a pointer type
+	//TY_IDX pty = TY_pointed(ty);
+	TY_IDX ty_p = Make_Pointer_Type(ty);
+	ST *karg = NULL;
 	karg = New_ST( CURRENT_SYMTAB );
 	ST_Init(karg,
 			Save_Str( localname ),
 			CLASS_VAR,
 			SCLASS_FORMAL,
 			EXPORT_LOCAL,
-			Be_Type_Tbl(MTYPE_U4));
+			ty_p);
 	Set_ST_is_value_parm( karg );
-	st_isPow2 = karg;
+	st_input_data = karg;	
 
 }
+
 
 
 /*Init value of reduction*/
@@ -10504,24 +11561,130 @@ static char* ACC_Get_ScalarName_of_Reduction(TYPE_ID typeID)
 }
 
 
-//vector<acc_reduction_kernels_pair> acc_reduction_kernels_maps
-static void ACC_Create_Reduction_Kernels ( PAR_FUNC_ACC_TYPE func_type, OPERATOR ReductionOpr, ST* st_reduction_var)
+/*Init value of reduction*/
+static char* ACC_Get_LoopTypeName_of_Reduction(ACC_LOOP_TYPE looptype)
 {
-  BOOL is_region = FALSE, has_gtid = FALSE;
-  switch (func_type) {  
-  case PAR_FUNC_ACC_REGION:
-    is_region = TRUE;
-    has_gtid = TRUE;
-    break;
-  default:
-    Fail_FmtAssertion("invalid parallel acc function type %d", (INT) func_type);
-    break;
+	switch(looptype)
+	{
+	case ACC_VECTOR: 			
+		return "vector";
+	case ACC_WORKER_VECTOR:  	
+		return "worker_vector";
+	case ACC_WORKER:  		 	
+		return "worker";
+	default:
+		Is_True(FALSE, ("Wrong reduction Loop Type."));
+	}
+}
+
+ST_IDX Make_ACC_CUDA_Runtime_ST ( ST* st_device_func)
+{
+  //Is_True(rop >= ACCRUNTIME_FIRST && rop <= ACCRUNTIME_LAST,
+  //        ("Make_ACCRuntime_ST: bad rop == %d", (INT) rop));
+  if(acc_reduction_device_reduction_call[st_device_func])
+  	return ST_st_idx(*acc_reduction_device_reduction_call[st_device_func]);
+
+    // If the global type doesn't exist, create it and its pointer type.
+  if (accruntime_ty == TY_IDX_ZERO) {
+    TY &mpr_ty = New_TY ( accruntime_ty );
+    TY_Init(mpr_ty, 0, KIND_FUNCTION, MTYPE_UNKNOWN,
+            Save_Str(".accruntime"));
+    Set_TY_align(accruntime_ty, 1);
+
+    TYLIST_IDX parm_idx;
+    TYLIST& parm_list = New_TYLIST(parm_idx);
+    Set_TY_tylist(mpr_ty, parm_idx);
+    Set_TYLIST_type(parm_list, Be_Type_Tbl(MTYPE_I4));  // I4 return type
+      // are there really no parameters? -- DRK
+    Set_TYLIST_type(New_TYLIST(parm_idx), TY_IDX_ZERO); // end of parm list
+
+    TY_IDX ty_idx;
+    TY &ty = New_TY ( ty_idx );
+    TY_Init(ty, Pointer_Size, KIND_POINTER, Pointer_Mtype,
+      Save_Str ( ".accruntime_ptr" ));
+    Set_TY_pointed(ty, accruntime_ty);
+
+    Set_TY_align(ty_idx, Pointer_Size); // unnecessary? TY_Init does
+                                        // not set alignment -- DRK
   }
-    // should be merged up after done. Currently reserved for Debug
+
+  PU_IDX pu_idx;
+  PU& pu = New_PU(pu_idx);
+  PU_Init(pu, accruntime_ty, CURRENT_SYMTAB);
+
+  /*  Create the ST, fill in all appropriate fields and enter into the */
+  /*  global symbol table.  */
+
+  ST *st = New_ST ( GLOBAL_SYMTAB );
+  ST_Init(st, Save_Str ( ST_name(st_device_func) ), CLASS_FUNC, SCLASS_EXTERN,
+    EXPORT_PREEMPTIBLE, pu_idx);
+
+  Allocate_Object ( st );
+  acc_reduction_device_reduction_call[st_device_func] = st;
+  //accr_sts[rop] = ST_st_idx(*st);
+  return ST_st_idx(*acc_reduction_device_reduction_call[st_device_func]);
+}
+
+/*static WN* ACC_Gen_Dynamic_LaunchReductionKernel(ST* st_kernel_func, ST* st_inputdata)
+{
+  WN * wn;
+  WN * wnx;
+  wn = WN_Create(OPC_VCALL, 1);
+  WN_st_idx(wn) = ST_st_idx(*st_kernel_func);
+  ST* st_fun = WN_st(wn);
+  //Set_ST_st_idx(st_fun, Save_Str(ST_name(st_device_func)));
+  WN_Set_Call_Non_Data_Mod(wn);
+  WN_Set_Call_Non_Data_Ref(wn);
+  WN_Set_Call_Non_Parm_Mod(wn);
+  WN_Set_Call_Non_Parm_Ref(wn);
+  WN_Set_Call_Parm_Ref(wn);
+  WN_linenum(wn) = acc_line_number;
+
+  wnx = WN_Ldid(Pointer_type, 0, st_inputdata, ST_type(st_inputdata));
+
+
+  //wnx = WN_Lda( Pointer_type, 0, Src);
+  WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
+                       WN_ty(wnx), WN_PARM_BY_VALUE);
+  return wn;
+}*/
+
+static WN* ACC_Gen_Call_Local_Reduction(ST* st_device_func, ST* st_inputdata)
+{
+  WN * wn;
+  WN * wnx;
+  wn = WN_Create(OPC_VCALL, 1);
+  WN_st_idx(wn) = ST_st_idx(*st_device_func);
+  ST* st_fun = WN_st(wn);
+  //Set_ST_st_idx(st_fun, Save_Str(ST_name(st_device_func)));
+  WN_Set_Call_Non_Data_Mod(wn);
+  WN_Set_Call_Non_Data_Ref(wn);
+  WN_Set_Call_Non_Parm_Mod(wn);
+  WN_Set_Call_Non_Parm_Ref(wn);
+  WN_Set_Call_Parm_Ref(wn);
+  WN_linenum(wn) = acc_line_number;
+
+  wnx = WN_Ldid(Pointer_type, 0, st_inputdata, ST_type(st_inputdata));
+
+
+  //wnx = WN_Lda( Pointer_type, 0, Src);
+  WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
+                       WN_ty(wnx), WN_PARM_BY_VALUE);
+  return wn;
+}
+
+//vector<acc_reduction_kernels_pair> acc_reduction_kernels_maps
+static void ACC_Create_Reduction_Kernels ( PAR_FUNC_ACC_TYPE func_type, 
+				ACC_ReductionMap* pReduction_map)
+{
+  // should be merged up after done. Currently reserved for Debug
   const char *construct_type_str = "accrg_reduction";
   char temp_str[64];
   char szReduction_name[64];
   char szReduction_datatype[64];
+  OPERATOR ReductionOpr = pReduction_map->ReductionOpr;
+  ST* st_reduction_var = pReduction_map->hostName;
+  char* looptype;
 
   sprintf(szReduction_name, "%s", ACC_Get_Name_of_Reduction(ReductionOpr));
   sprintf(szReduction_datatype, "%s", ACC_Get_ScalarName_of_Reduction(TY_mtype(ST_type(st_reduction_var))));
@@ -10530,14 +11693,17 @@ static void ACC_Create_Reduction_Kernels ( PAR_FUNC_ACC_TYPE func_type, OPERATOR
   // should PAR regions and PAR DO's be numbered separately? -- DRK
   const char *old_st_name = ST_name(PU_Info_proc_sym(Current_PU_Info));
   char *st_name = (char *) alloca(strlen(old_st_name) + 64);
-
-  sprintf ( st_name, "__%s_%s_%s_%d_%d", construct_type_str, szReduction_name, szReduction_datatype,
+  if(func_type == PAR_FUNC_ACC_KERNEL)
+  	looptype = "kernel";
+  else
+  	looptype = ACC_Get_LoopTypeName_of_Reduction(pReduction_map->looptype);
+  sprintf ( st_name, "__%s_%s_%s_%s_%d_%d", construct_type_str, looptype, szReduction_name, szReduction_datatype,
 	      acc_region_num, acc_construct_num );
   
   acc_construct_num ++;
   // get function prototype
 
-  TY_IDX &func_ty_idx = acc_region_ty;
+  TY_IDX func_ty_idx = TY_IDX_ZERO;
 
   if  (func_ty_idx == TY_IDX_ZERO) 
   {
@@ -10549,20 +11715,15 @@ static void ACC_Create_Reduction_Kernels ( PAR_FUNC_ACC_TYPE func_type, OPERATOR
     Set_TY_align(func_ty_idx, 1);
 	
     Set_TY_has_prototype(func_ty_idx);
+	
 
     TYLIST_IDX parm_idx;
-    TYLIST& parm_list = New_TYLIST(parm_idx);
+    TYLIST& parm_list = New_TYLIST(parm_idx);	
     Set_TY_tylist(ty, parm_idx);
     Set_TYLIST_type(parm_list, Be_Type_Tbl(MTYPE_V));  // return type
 
-      // Two basic parameters
-    if (has_gtid)
-      Set_TYLIST_type(New_TYLIST(parm_idx), Be_Type_Tbl(Pointer_type)); // gtid
     /* turn this off if don't want to use taskargs struct */
     //else if (0)
-
-    Set_TYLIST_type(New_TYLIST(parm_idx), Be_Type_Tbl(Pointer_type)); // btid
-
 
     Set_TYLIST_type(New_TYLIST(parm_idx), TY_IDX_ZERO); // end of parm list
 
@@ -10625,18 +11786,27 @@ is inheriting pu_recursive OK?
           CLASS_FUNC,
           SCLASS_TEXT,
           EXPORT_LOCAL,
-          pu_idx);
-  Set_ST_addr_passed(acc_reduction_proc);
-  Set_ST_ACC_kernels_func(acc_reduction_proc);
+          TY_IDX (pu_idx));
+  Set_ST_addr_passed(acc_reduction_proc);  
+  Set_ST_sfname_idx(acc_reduction_proc, Save_Str(Src_File_Name));
+  
+  if(func_type == PAR_FUNC_ACC_KERNEL)
+  	Set_ST_ACC_kernels_func(acc_reduction_proc);
+  else if(func_type == PAR_FUNC_ACC_DEVICE)
+  	Set_ST_ACC_device_func(acc_reduction_proc);
 
-  Allocate_Object ( acc_reduction_proc );
+  Allocate_Object ( acc_reduction_proc);
 
   //
   acc_reduction_kernels_pair reduction_pairs;
   reduction_pairs.opr_ty = ST_type(st_reduction_var);
   reduction_pairs.ReductionOpr = ReductionOpr;
   reduction_pairs.st_kernels_fun = acc_reduction_proc;
-  acc_reduction_kernels_maps.push_back(reduction_pairs);
+  reduction_pairs.looptype = pReduction_map->looptype;
+  if(func_type == PAR_FUNC_ACC_KERNEL)
+  	acc_reduction_kernels_maps.push_back(reduction_pairs);
+  else
+  	acc_reduction_devices_maps.push_back(reduction_pairs);
 
 
   // create nested symbol table for parallel function
@@ -10668,7 +11838,10 @@ is inheriting pu_recursive OK?
   ST *arg_gtid = NULL;
   ST *task_args = NULL;
   //Create the local ST for  kernels parameters
-  Create_reduction_kernel_st_params(st_reduction_var);
+  if(func_type == PAR_FUNC_ACC_KERNEL)
+  	Create_reduction_kernel_st_params(st_reduction_var);
+  else
+  	Create_reduction_device_st_params(st_reduction_var);
   //if(isParallelRegion)
   //	Create_kernel_parameters_ST(pPRInfo->acc_param);
   //else  	
@@ -10789,35 +11962,44 @@ is inheriting pu_recursive OK?
   WN* pragma_block = WN_CreateBlock ( );
 #ifdef KEY
   WN *current_pu_tree = PU_Info_tree_ptr(Current_PU_Info);
-  WN *thread_priv_prag = WN_first(WN_func_pragmas(PU_Info_tree_ptr(Current_PU_Info)));
+  //WN *thread_priv_prag = WN_first(WN_func_pragmas(PU_Info_tree_ptr(Current_PU_Info)));
   
 #endif
   // Currently, don't pass data via arguments.
-  UINT arg_cnt = (has_gtid ? 2 : 1);
+  //UINT arg_cnt = 1;
   /* turn this off if don't want to use taskargs struct */
   //if (is_task_region) arg_cnt = 2;
 
   //UINT slink_arg_pos = arg_cnt - 1;
-  WN *func_entry = WN_CreateEntry ( 5, acc_reduction_proc,
-                                    acc_reduction_func, pragma_block,
-                                    reference_block );
   //acc_last_microtask = func_entry;
 
   //if (has_gtid) {
   //  WN_kid0(func_entry) = WN_CreateIdname ( 0, arg_gtid );
   //} 
   UINT ikid = 0;
+  WN *func_entry;
   //vector<ST*>::iterator itor = kernel_param.begin();
   //while(ikid < reduction_kernel_param.size())
-  //{
+  if(func_type == PAR_FUNC_ACC_KERNEL)
+  {
+     func_entry = WN_CreateEntry ( 4, acc_reduction_proc,
+                                    acc_reduction_func, pragma_block,
+                                    reference_block );
      WN_kid(func_entry, 0) = WN_CreateIdname ( 0, ST_st_idx(st_input_data));
      WN_kid(func_entry, 1) = WN_CreateIdname ( 0, ST_st_idx(st_output_data));
      WN_kid(func_entry, 2) = WN_CreateIdname ( 0, ST_st_idx(st_num_elem));
      WN_kid(func_entry, 3) = WN_CreateIdname ( 0, ST_st_idx(st_blocksize));
-     WN_kid(func_entry, 4) = WN_CreateIdname ( 0, ST_st_idx(st_isPow2));
+     //WN_kid(func_entry, 4) = WN_CreateIdname ( 0, ST_st_idx(st_isPow2));
 	 //ACC_Add_DST_variable ( reduction_kernel_param[ikid], acc_nested_dst, acc_line_number, DST_INVALID_IDX );
   	 //ikid ++;
-  //}
+  }
+  else
+  {
+     func_entry = WN_CreateEntry ( 1, acc_reduction_proc,
+                                    acc_reduction_func, pragma_block,
+                                    reference_block );
+     WN_kid(func_entry, 0) = WN_CreateIdname ( 0, ST_st_idx(st_input_data));
+  }
 
      // TODO: variable arguments list should be added here.
 
@@ -10840,23 +12022,23 @@ is inheriting pu_recursive OK?
 
   // don't copy nystrom points to analysis, alias_tag map
   // mp function's points to analysis will be analyzed locally.
-  AliasAnalyzer *aa = AliasAnalyzer::aliasAnalyzer();
-  if (aa) 
-  {
-    // Current_Map_Tab is update to PU_Info_maptab(parallel_pu) in PU_Info_maptab
-    Is_True(PU_Info_maptab(reduction_kernels_pu) == Current_Map_Tab,
-        ("parallel_pu's PU's maptab isn't parallel_pu\n"));
+  //AliasAnalyzer *aa = AliasAnalyzer::aliasAnalyzer();
+  //if (aa) 
+  //{
+  //  // Current_Map_Tab is update to PU_Info_maptab(parallel_pu) in PU_Info_maptab
+  //  Is_True(PU_Info_maptab(reduction_kernels_pu) == Current_Map_Tab,
+  //      ("parallel_pu's PU's maptab isn't parallel_pu\n"));
+  //  Current_Map_Tab = acc_pmaptab;
+  //  WN_MAP_Set_dont_copy(aa->aliasTagMap(), TRUE);
+  //  WN_MAP_Set_dont_copy(WN_MAP_ALIAS_CGNODE, TRUE);
+  //  Current_Map_Tab = PU_Info_maptab(reduction_kernels_pu);
+  //}
+  //else 
+  //{
     Current_Map_Tab = acc_pmaptab;
-    WN_MAP_Set_dont_copy(aa->aliasTagMap(), TRUE);
     WN_MAP_Set_dont_copy(WN_MAP_ALIAS_CGNODE, TRUE);
     Current_Map_Tab = PU_Info_maptab(reduction_kernels_pu);
-  }
-  else 
-  {
-    Current_Map_Tab = acc_pmaptab;
-    WN_MAP_Set_dont_copy(WN_MAP_ALIAS_CGNODE, TRUE);
-    Current_Map_Tab = PU_Info_maptab(reduction_kernels_pu);
-  }
+  //}
 
     // use hack to save csymtab using parallel_pu, so we can restore it
     // later when we lower parallel_pu; this is necessary because the
@@ -10911,6 +12093,8 @@ is inheriting pu_recursive OK?
 
 }
 
+
+//kernel function for reductions
 static ST* ACC_Get_Reduction_kernels(OPERATOR ReductionOpr, TY_IDX ty_reduction_opr)
 {
 	int i=0;
@@ -10926,6 +12110,28 @@ static ST* ACC_Get_Reduction_kernels(OPERATOR ReductionOpr, TY_IDX ty_reduction_
 	}
 	return NULL;
 }
+
+//device function for reductions
+static ST* ACC_Get_Reduction_devices(ACC_ReductionMap* pReduction_map)
+{
+	int i=0;	
+	OPERATOR ReductionOpr = pReduction_map->ReductionOpr;
+    TY_IDX ty_reduction_opr = ST_type(pReduction_map->hostName);
+	ACC_LOOP_TYPE looptype = pReduction_map->looptype;
+	while(i<acc_reduction_devices_maps.size())
+	{
+		acc_reduction_kernels_pair kernelsPair = acc_reduction_devices_maps[i];
+		if(kernelsPair.opr_ty == ty_reduction_opr
+				&& kernelsPair.ReductionOpr == ReductionOpr
+				&& kernelsPair.looptype == looptype)
+			{
+				return kernelsPair.st_kernels_fun;
+			}
+		i++;
+	}
+	return NULL;
+}
+
 
 static WN* ACC_LoadDeviceSharedArrayElem(WN* wn_array_offset, ST* st_array)
 {
@@ -10985,6 +12191,41 @@ static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr)
 	return wn_init;
 }
 
+static WN* GenRightShiftAndOrOperations(WN* wn_op, WN* wn_bitpos)
+{
+	TYPE_ID rtype = TY_mtype(ST_type(WN_st(wn_op)));
+	WN* wn_rightShift = WN_Binary(OPR_ASHR, rtype, WN_COPY_Tree(wn_op), wn_bitpos);
+	WN* wn_OrOpr = WN_Binary(OPR_BIOR, rtype, WN_COPY_Tree(wn_op), wn_rightShift);
+	
+	wn_OrOpr = WN_Stid(rtype, 0, WN_st(wn_op), ST_type(WN_st(wn_op)), wn_OrOpr);
+	return wn_OrOpr;
+}
+
+static WN* Gen_Next_Pow2DeviceStmt(WN* wn_op, WN* wn_replace_block)
+{
+	TYPE_ID rtype = TY_mtype(ST_type(WN_st(wn_op)));//
+	WN* wn_ShrAndOr;
+	WN* wn_minusOne = WN_Binary(OPR_SUB, rtype, WN_COPY_Tree(wn_op), WN_Intconst(rtype, 1));
+	wn_minusOne = WN_Stid(TY_mtype(ST_type(WN_st(wn_op))), 0, WN_st(wn_op),
+								ST_type(WN_st(wn_op)), wn_minusOne);
+	WN_INSERT_BlockLast(wn_replace_block,  wn_minusOne);
+
+	wn_ShrAndOr = GenRightShiftAndOrOperations(wn_op, WN_Intconst(rtype, 1));
+	WN_INSERT_BlockLast(wn_replace_block,  wn_ShrAndOr);
+	wn_ShrAndOr = GenRightShiftAndOrOperations(wn_op, WN_Intconst(rtype, 2));
+	WN_INSERT_BlockLast(wn_replace_block,  wn_ShrAndOr);
+	wn_ShrAndOr = GenRightShiftAndOrOperations(wn_op, WN_Intconst(rtype, 4));
+	WN_INSERT_BlockLast(wn_replace_block,  wn_ShrAndOr);
+	wn_ShrAndOr = GenRightShiftAndOrOperations(wn_op, WN_Intconst(rtype, 8));
+	WN_INSERT_BlockLast(wn_replace_block,  wn_ShrAndOr);
+	wn_ShrAndOr = GenRightShiftAndOrOperations(wn_op, WN_Intconst(rtype, 16));
+	WN_INSERT_BlockLast(wn_replace_block,  wn_ShrAndOr);
+	
+	WN* wn_plusOne = WN_Binary(OPR_ADD, rtype, WN_COPY_Tree(wn_op), WN_Intconst(rtype, 1));
+	wn_plusOne = WN_Stid(TY_mtype(ST_type(WN_st(wn_op))), 0, WN_st(wn_op),
+								ST_type(WN_st(wn_op)), wn_plusOne);
+	WN_INSERT_BlockLast(wn_replace_block,  wn_plusOne);
+}
 
 static WN* Gen_Sync_Threads()
 {
@@ -11002,20 +12243,63 @@ static WN* Gen_Sync_Threads()
   return wn;
 }
 
-static WN* Gen_ReductionIfElseBlock1(WN* wn_blocksize, WN* wn_tid, ST* st_shared_array,
+static WN* Gen_ReductionIfElseBlock1_Vector(WN* wn_blocksize, WN* wn_tid, WN* wn_btid, ST* st_shared_array,
 						WN* wn_mySum, unsigned int ilimit, OPERATOR ReductionOpr)
 {
-	WN* wn_IfOuterTest = WN_Relational (OPR_GE, TY_mtype(ST_type(WN_st(wn_blocksize))), 
+	WN* wn_IfOuterTest = WN_Relational (OPR_GE, MTYPE_U4, 
 								WN_COPY_Tree(wn_blocksize), 
 								WN_Intconst(MTYPE_U4, ilimit));
-	WN* wn_IfInnerTest = WN_Relational (OPR_LT, TY_mtype(ST_type(WN_st(wn_tid))), 
+	WN* wn_IfInnerTest = WN_Relational (OPR_LT, MTYPE_U4, 
 								WN_COPY_Tree(wn_tid), 
 								WN_Intconst(MTYPE_U4, ilimit/2));;
 	WN* wn_OuterBlock = WN_CreateBlock();
 	WN* wn_InnerBlock = WN_CreateBlock();
 	WN* wn_CallSyncThreads = Gen_Sync_Threads();
 	
-	WN* Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(WN_st(wn_tid))), 
+	WN* Init0 = WN_Binary(OPR_ADD, MTYPE_U4, 
+					WN_COPY_Tree(wn_tid), WN_Intconst(MTYPE_U4, ilimit/2));
+	TY_IDX elem_ty;
+	if(TY_kind(ST_type(st_shared_array)) == KIND_ARRAY)
+		elem_ty = TY_etype(ST_type(st_shared_array));
+	else if(TY_kind(ST_type(st_shared_array)) == KIND_POINTER)
+		elem_ty = TY_pointed(ST_type(st_shared_array));
+	else
+    	Fail_FmtAssertion("invalid TY_kind. It must be ARRAY or POINTER in Gen_ReductionIfElseBlock1");	
+			
+	Init0 = ACC_LoadDeviceSharedArrayElem(Init0, st_shared_array);	
+	Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, Init0);
+	
+	Init0 = WN_Binary(ReductionOpr, TY_mtype(ST_type(WN_st(wn_mySum))), WN_COPY_Tree(wn_mySum), Init0);
+	Init0 = WN_Stid(TY_mtype(ST_type(WN_st(wn_mySum))), 0, WN_st(wn_mySum),
+								ST_type(WN_st(wn_mySum)), Init0);	
+	WN_INSERT_BlockLast(wn_InnerBlock,  Init0);
+
+
+	Init0 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btid), st_shared_array);	
+	Init0 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), Init0, WN_COPY_Tree(wn_mySum));	
+	WN_INSERT_BlockLast(wn_InnerBlock,  Init0);
+	Init0 = WN_CreateIf(wn_IfInnerTest, wn_InnerBlock, WN_CreateBlock());
+	WN_INSERT_BlockLast(wn_OuterBlock,  Init0);
+	WN_INSERT_BlockLast(wn_OuterBlock,  wn_CallSyncThreads);
+	Init0 = WN_CreateIf(wn_IfOuterTest, wn_OuterBlock, WN_CreateBlock());
+	return Init0;
+}
+
+
+static WN* Gen_ReductionIfElseBlock1(WN* wn_blocksize, WN* wn_tid, ST* st_shared_array,
+						WN* wn_mySum, unsigned int ilimit, OPERATOR ReductionOpr)
+{
+	WN* wn_IfOuterTest = WN_Relational (OPR_GE, MTYPE_U4, 
+								WN_COPY_Tree(wn_blocksize), 
+								WN_Intconst(MTYPE_U4, ilimit));
+	WN* wn_IfInnerTest = WN_Relational (OPR_LT, MTYPE_U4, 
+								WN_COPY_Tree(wn_tid), 
+								WN_Intconst(MTYPE_U4, ilimit/2));;
+	WN* wn_OuterBlock = WN_CreateBlock();
+	WN* wn_InnerBlock = WN_CreateBlock();
+	WN* wn_CallSyncThreads = Gen_Sync_Threads();
+	
+	WN* Init0 = WN_Binary(OPR_ADD, MTYPE_U4, 
 					WN_COPY_Tree(wn_tid), WN_Intconst(MTYPE_U4, ilimit/2));
 	TY_IDX elem_ty;
 	if(TY_kind(ST_type(st_shared_array)) == KIND_ARRAY)
@@ -11048,7 +12332,7 @@ static WN* Gen_ReductionIfElseBlock1(WN* wn_blocksize, WN* wn_tid, ST* st_shared
 static WN* Gen_ReductionIfElseBlock2(WN* wn_blocksize, WN* wn_tid, ST* st_shared_array,
 						WN* wn_mySum, unsigned int ilimit, OPERATOR ReductionOpr)
 {
-	WN* wn_IfOuterTest = WN_Relational (OPR_GE, TY_mtype(ST_type(WN_st(wn_blocksize))), 
+	WN* wn_IfOuterTest = WN_Relational (OPR_GE, MTYPE_U4, 
 								WN_COPY_Tree(wn_blocksize), 
 								WN_Intconst(MTYPE_U4, ilimit));
 	//WN* wn_IfInnerTest = WN_Relational (OPR_LT, TY_mtype(ST_type(WN_st(wn_tid))), 
@@ -11065,7 +12349,7 @@ static WN* Gen_ReductionIfElseBlock2(WN* wn_blocksize, WN* wn_tid, ST* st_shared
 	else
     	Fail_FmtAssertion("invalid TY_kind. It must be ARRAY or POINTER in Gen_ReductionIfElseBlock2");	
 	
-	WN* Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(WN_st(wn_tid))), 
+	WN* Init0 = WN_Binary(OPR_ADD, MTYPE_U4, 
 					WN_COPY_Tree(wn_tid), WN_Intconst(MTYPE_U4, ilimit/2));
 	Init0 = ACC_LoadDeviceSharedArrayElem(Init0, st_shared_array);	
 	Init0 = WN_Iload(TY_mtype(elem_ty), 0,  
@@ -11088,26 +12372,26 @@ static WN* Gen_ReductionIfElseBlock2(WN* wn_blocksize, WN* wn_tid, ST* st_shared
 	return Init0;
 }
 
-/*return the reduction kernels name, every type of reduction will be return once.
+/*return the reduction device function name, every type of reduction will be return once.
 For example,  if "+" was generated once, compiler won't generate another "+" kernel. 
 It will just return the previous function name.
 This function is only valid for Kernels outter Loop reduction.
 */
-static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node)
+static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduction_map)
 {
 	
-	OPERATOR ReductionOpr = (OPERATOR)WN_pragma_arg2(reduction_node);
+	OPERATOR ReductionOpr = pReduction_map->ReductionOpr;
 	WN* reduction_params = NULL;
 	//reductionmap	
-	ST *old_st = WN_st(reduction_node);
+	ST *old_st = pReduction_map->hostName;
 	INT64 acc_dtype = 
 			GetKernelParamType(old_st);
-	WN_OFFSET old_offset = WN_offsetx(reduction_node);		
+	//WN_OFFSET old_offset = WN_offsetx(reduction_node);		
     TY_IDX ty = ST_type(old_st);
     TY_KIND kind = TY_kind(ty);//ST_name(old_st)
     //char* localname; //= (char *) alloca(strlen(ST_name(old_st))+10);
 	//sprintf ( localname, "__device_reduction_%s", ST_name(old_st));
-	ST* st_kernel = ACC_Get_Reduction_kernels(ReductionOpr, ty);
+	ST* st_kernel = ACC_Get_Reduction_devices(pReduction_map);
 	if(st_kernel)
 		return st_kernel;
 	
@@ -11116,7 +12400,285 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node)
 	acc_ppuinfo = Current_PU_Info;
 	acc_pmaptab = Current_Map_Tab;
 	ACC_Push_Some_Globals( );
-	ACC_Create_Reduction_Kernels(PAR_FUNC_ACC_REGION, ReductionOpr, old_st);
+	ACC_Create_Reduction_Kernels(PAR_FUNC_ACC_DEVICE, pReduction_map);
+	//////////////////////////////////////////////////////
+	//make local declaress
+    char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
+	ST* st_shared_array = st_input_data; //this is actually a shared memory buffer pointer 
+	
+	
+	//WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+	//				0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	
+	ST* st_tid = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_tid,
+	  Save_Str("tid"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_tid = WN_Ldid(TY_mtype(ST_type(st_tid)), 
+					0, st_tid, ST_type(st_tid));
+
+	//my sum
+	ST* st_mySum = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_mySum,
+	  Save_Str("mySum"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty);
+	WN* wn_mySum = WN_Ldid(TY_mtype(ST_type(st_mySum)), 
+					0, st_mySum, ST_type(st_mySum));
+	//blocksize
+	ST* st_blockSize = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_blockSize,
+	  Save_Str("blockSize"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_blockSize = WN_Ldid(TY_mtype(ST_type(st_blockSize)), 
+					0, st_blockSize, ST_type(st_blockSize));
+	//nextpow2
+	ST* st_nextpow2 = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_nextpow2,
+	  Save_Str("nextpow2"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));	
+	WN* wn_nextpow2 = WN_Ldid(TY_mtype(ST_type(st_nextpow2)), 
+					0, st_nextpow2, ST_type(st_nextpow2));
+
+	
+	//prevpow2
+	ST* st_prevpow2 = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_prevpow2,
+	  Save_Str("prevpow2"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));	
+	WN* wn_prevpow2 = WN_Ldid(TY_mtype(ST_type(st_prevpow2)), 
+					0, st_prevpow2, ST_type(st_prevpow2));
+	
+	
+	//Set up predefined variable in CUDA
+	WN* wn_threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	WN* wn_threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
+					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
+	WN* wn_threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
+					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
+	
+	WN* wn_blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
+					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
+	WN* wn_blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
+					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
+	WN* wn_blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
+					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
+	
+	WN* wn_blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
+	WN* wn_blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
+					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
+	WN* wn_blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
+					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
+	
+	WN* wn_griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
+					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
+	WN* wn_griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
+					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
+	WN* wn_griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
+					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
+
+
+	WN* Init0 = NULL;
+	//pow2 alignment first
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_nextpow2)), 
+					WN_COPY_Tree(wn_blockdimx), WN_COPY_Tree(wn_blockdimy));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_nextpow2)), 0, 
+					st_nextpow2, ST_type(st_nextpow2), Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	//gen aligment stmt
+	Gen_Next_Pow2DeviceStmt(wn_nextpow2, acc_reduction_func);
+
+	//prevpow2 = nextpow2 >> 1
+	Init0 = WN_Binary(OPR_ASHR, TY_mtype(ST_type(st_nextpow2)), 
+					WN_COPY_Tree(wn_nextpow2), 
+					WN_Intconst(TY_mtype(ST_type(st_nextpow2)), 1));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_prevpow2)), 0, 
+					st_prevpow2, ST_type(st_prevpow2), Init0);
+
+
+	//tid = threadIdx.y * blockdim.x + threadIdx.x
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+						WN_COPY_Tree(wn_threadidy), WN_COPY_Tree(wn_blockdimx));
+	Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+						Init0, WN_COPY_Tree(wn_threadidx));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);	
+	//blocksize = blockdimx*blockdimy
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+									WN_COPY_Tree(wn_blockdimx), WN_COPY_Tree(wn_blockdimy));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_blockSize)), 0, st_blockSize, 
+									ST_type(st_blockSize), Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+
+	/////////////////////////////////////////////////////////////////////////////////	
+	WN* wn_IfTest1 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_tid), 
+								WN_COPY_Tree(wn_prevpow2));
+	WN* wn_IfBody1 = WN_CreateBlock();
+	/////////////////////////////////////////////////////////////////////////////////
+	WN* wn_nextIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+							WN_COPY_Tree(wn_tid), WN_COPY_Tree(wn_prevpow2));
+	WN* wn_IfTest11 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_nextIndex), WN_COPY_Tree(wn_blockSize));
+	WN* wn_IfBody11 = WN_CreateBlock();
+	
+	WN* wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_nextIndex), st_shared_array);	
+	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
+	
+	WN* wn_shArr2 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	wn_shArr2 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr2);
+	
+	Init0 = WN_Binary(ReductionOpr, TY_mtype(ty), wn_shArr2, wn_shArr1);
+
+	
+	WN* wn_shArr3 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);
+	wn_shArr3 = WN_Istore(TY_mtype(ty), 0, Make_Pointer_Type(ty), wn_shArr3, Init0);
+	WN_INSERT_BlockLast( wn_IfBody11,  wn_shArr3);
+	WN* wn_ifThenElse = WN_CreateIf(wn_IfTest11, wn_IfBody11, WN_CreateBlock());
+	////////////////////////////////////////////////////////////////////////////////////////
+	WN_INSERT_BlockLast( wn_IfBody1,  wn_ifThenElse);
+	wn_ifThenElse = WN_CreateIf(wn_IfTest1, wn_IfBody1, WN_CreateBlock());
+	//init sum
+	wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
+	//Init0 = ACC_Get_Init_Value_of_Reduction(ReductionOpr);
+	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	//mySum += g_idata[btid];
+	/*Init0 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btid), st_input_data);
+	Init0 = WN_Iload(TY_mtype(TY_pointed(ST_type(st_input_data))), 0,  
+									TY_pointed(ST_type(st_input_data)), Init0);
+	Init0 = WN_Binary(ReductionOpr, TY_mtype(ST_type(st_mySum)), WN_COPY_Tree(wn_mySum), Init0);
+	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), Init0);*/
+
+
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+
+	
+	WN* wn_IfTest2 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_tid), 
+								WN_Intconst(MTYPE_U4, 32));
+	WN* wn_IfBody2 = WN_CreateBlock();
+	
+    localname = (char *) alloca(strlen(ST_name(old_st))+10);
+	sprintf ( localname, "__smem_%s", ST_name(old_st));
+	Set_TY_is_volatile(ty);
+	TY_IDX ty_pointer = Make_Pointer_Type(ty);
+	ST* st_smem_pointer = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_smem_pointer,
+	  Save_Str(localname),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty_pointer);
+	
+    Init0 = WN_Ldid(Pointer_type, 0, st_shared_array, ST_type(st_shared_array));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_smem_pointer)), 0, 
+					st_smem_pointer, ST_type(st_smem_pointer), Init0);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	WN* wn_ifThenElse2 = WN_CreateIf(wn_IfTest2, wn_IfBody2, WN_CreateBlock());
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse2);
+
+	
+	
+	
+	//Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(WN_st(wn_tid))), 
+	//				WN_COPY_Tree(wn_tid), WN_Intconst(MTYPE_U4, ilimit/2));
+	/*Init0 = ACC_LoadDeviceSharedArrayElem(WN_Intconst(MTYPE_U4, 0), st_shared_array);	
+	Init0 = WN_Iload(TY_mtype(TY_pointed(ST_type(st_shared_array))), 0,  
+									TY_pointed(ST_type(st_shared_array)), Init0);
+	
+    WN* wn_return = WN_CreateReturn_Val (OPR_RETURN_VAL, TY_mtype(ST_type(old_st)), MTYPE_V, Init0);
+	
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_return);//*/
+
+	
+	////////////////////////////////////////////////////////////////
+	//restore info
+	//ACC_Transfer_Maps ( acc_pmaptab, acc_cmaptab, acc_reduction_func, 
+	//	  PU_Info_regions_ptr(Current_PU_Info) );
+
+	/* Create a new dependence graph for the child  and move all the 
+	 appropriate vertices from the parent to the child graph */
+
+	//Current_Map_Tab = acc_cmaptab;
+	//ACC_Fix_Dependence_Graph ( acc_ppuinfo, Current_PU_Info, acc_reduction_func); 
+	//Current_Map_Tab = acc_pmaptab;
+
+  
+	/* Restore parent information. */
+
+	CURRENT_SYMTAB = acc_psymtab;
+	Current_PU_Info = acc_ppuinfo;
+	Current_pu = &Current_PU_Info_pu();
+	Current_Map_Tab = acc_pmaptab;
+	ACC_Pop_Some_Globals( );
+
+	return acc_reduction_proc;
+}
+
+/*return the reduction device function name, every type of reduction will be return once.
+For example,  if "+" was generated once, compiler won't generate another "+" kernel. 
+It will just return the previous function name.
+This function is only valid for Kernels outter Loop reduction.
+*/
+static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_map)
+{
+	
+	OPERATOR ReductionOpr = pReduction_map->ReductionOpr;
+	WN* reduction_params = NULL;
+	//reductionmap	
+	ST *old_st = pReduction_map->hostName;
+	INT64 acc_dtype = 
+			GetKernelParamType(old_st);
+	//WN_OFFSET old_offset = WN_offsetx(reduction_node);		
+    TY_IDX ty = ST_type(old_st);
+    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+    //char* localname; //= (char *) alloca(strlen(ST_name(old_st))+10);
+	//sprintf ( localname, "__device_reduction_%s", ST_name(old_st));
+	ST* st_kernel = ACC_Get_Reduction_devices(pReduction_map);
+	if(st_kernel)
+		return st_kernel;
+	
+	//generate new reuction kernels for this type and this operator
+	acc_psymtab = CURRENT_SYMTAB;
+	acc_ppuinfo = Current_PU_Info;
+	acc_pmaptab = Current_Map_Tab;
+	ACC_Push_Some_Globals( );
+	ACC_Create_Reduction_Kernels(PAR_FUNC_ACC_DEVICE, pReduction_map);
 	//////////////////////////////////////////////////////
 	//make local declaress
     char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
@@ -11175,47 +12737,640 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node)
 	WN* wn_mySum = WN_Ldid(TY_mtype(ST_type(st_mySum)), 
 					0, st_mySum, ST_type(st_mySum));
 	
+
+	//nextpow2
+	ST* st_nextpow2 = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_nextpow2,
+	  Save_Str("nextpow2"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));	
+	WN* wn_nextpow2 = WN_Ldid(TY_mtype(ST_type(st_nextpow2)), 
+					0, st_nextpow2, ST_type(st_nextpow2));
+
+	
+	//prevpow2
+	ST* st_prevpow2 = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_prevpow2,
+	  Save_Str("prevpow2"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));	
+	WN* wn_prevpow2 = WN_Ldid(TY_mtype(ST_type(st_prevpow2)), 
+					0, st_prevpow2, ST_type(st_prevpow2));
+	
+	
+	WN* wn_blocksize = WN_Ldid(TY_mtype(ST_type(st_gridSize)), 
+					0, st_gridSize, ST_type(st_gridSize));
 	//Set up predefined variable in CUDA
-	WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+	WN* wn_threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
 					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
-	WN* threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
+	WN* wn_threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
 					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
-	WN* threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
+	WN* wn_threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
 					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
 	
-	WN* blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
+	WN* wn_blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
 					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
-	WN* blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
+	WN* wn_blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
 					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
-	WN* blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
+	WN* wn_blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
 					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
 	
-	WN* blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+	WN* wn_blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
 					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
-	WN* blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
+	WN* wn_blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
 					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
-	WN* blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
+	WN* wn_blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
 					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
 	
-	WN* griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
+	WN* wn_griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
 					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
-	WN* griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
+	WN* wn_griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
 					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
-	WN* griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
+	WN* wn_griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
 					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
 	
-	WN* Init0 = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), WN_COPY_Tree(threadidx));
+	WN* Init0 = NULL;
+	//pow2 alignment first
+	//Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_nextpow2)), 
+	//				WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockdimy));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_nextpow2)), 0, 
+					st_nextpow2, ST_type(st_nextpow2), WN_COPY_Tree(wn_blockdimy));
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	//gen aligment stmt
+	Gen_Next_Pow2DeviceStmt(wn_nextpow2, acc_reduction_func);
+
+	//prevpow2 = nextpow2 >> 1
+	Init0 = WN_Binary(OPR_ASHR, TY_mtype(ST_type(st_nextpow2)), 
+					WN_COPY_Tree(wn_nextpow2), 
+					WN_Intconst(TY_mtype(ST_type(st_nextpow2)), 1));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_prevpow2)), 0, 
+					st_prevpow2, ST_type(st_prevpow2), Init0);
+
+
+	//tid = threadIdx.y * blockdim.x + threadIdx.x
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+						WN_COPY_Tree(wn_threadidy), WN_COPY_Tree(wn_blockdimx));
+	Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+						Init0, WN_COPY_Tree(wn_threadidx));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);	
+	
+	//Init0 = ACC_Get_Init_Value_of_Reduction(ReductionOpr);
+	//Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), Init0);
+	//WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+
+	//////////////////////////////////////////////////////////////////////////////////	
+	WN* wn_IfTest1 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_tid), 
+								WN_COPY_Tree(wn_prevpow2));
+	WN* wn_IfBody1 = WN_CreateBlock();
+	/////////////////////////////////////////////////////////////////////////////////
+	WN* wn_nextIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+							WN_COPY_Tree(wn_tid), WN_COPY_Tree(wn_prevpow2));
+	WN* wn_IfTest11 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_nextIndex), WN_COPY_Tree(wn_blockdimy));
+	WN* wn_IfBody11 = WN_CreateBlock();
+	
+	WN* wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_nextIndex), st_shared_array);	
+	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
+	
+	WN* wn_shArr2 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	wn_shArr2 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr2);
+	
+	Init0 = WN_Binary(ReductionOpr, TY_mtype(ty), wn_shArr2, wn_shArr1);
+
+	
+	WN* wn_shArr3 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);
+	wn_shArr3 = WN_Istore(TY_mtype(ty), 0, Make_Pointer_Type(ty), wn_shArr3, Init0);
+	WN_INSERT_BlockLast( wn_IfBody11,  wn_shArr3);
+	WN* wn_ifThenElse = WN_CreateIf(wn_IfTest11, wn_IfBody11, WN_CreateBlock());
+	////////////////////////////////////////////////////////////////////////////////////////
+	WN_INSERT_BlockLast( wn_IfBody1,  wn_ifThenElse);
+	wn_ifThenElse = WN_CreateIf(wn_IfTest1, wn_IfBody1, WN_CreateBlock());
+	////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
+	//init sum
+	wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
+	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	
+	/////////////////////////////////////////////////////////////////////////////////
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+
+	
+	WN* wn_IfTest2 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_tid), 
+								WN_Intconst(MTYPE_U4, 32));
+	WN* wn_IfBody2 = WN_CreateBlock();
+	
+    localname = (char *) alloca(strlen(ST_name(old_st))+10);
+	sprintf ( localname, "__smem_%s", ST_name(old_st));
+	Set_TY_is_volatile(ty);
+	TY_IDX ty_pointer = Make_Pointer_Type(ty);
+	ST* st_smem_pointer = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_smem_pointer,
+	  Save_Str(localname),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty_pointer);
+	
+    Init0 = WN_Ldid(Pointer_type, 0, st_shared_array, ST_type(st_shared_array));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_smem_pointer)), 0, 
+					st_smem_pointer, ST_type(st_smem_pointer), Init0);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	WN* wn_ifThenElse2 = WN_CreateIf(wn_IfTest2, wn_IfBody2, WN_CreateBlock());
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse2);
+
+	
+	
+	
+	//Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(WN_st(wn_tid))), 
+	//				WN_COPY_Tree(wn_tid), WN_Intconst(MTYPE_U4, ilimit/2));
+	/*Init0 = ACC_LoadDeviceSharedArrayElem(WN_Intconst(MTYPE_U4, 0), st_shared_array);	
+	Init0 = WN_Iload(TY_mtype(TY_pointed(ST_type(st_shared_array))), 0,  
+									TY_pointed(ST_type(st_shared_array)), Init0);
+	
+    WN* wn_return = WN_CreateReturn_Val (OPR_RETURN_VAL, TY_mtype(ST_type(old_st)), MTYPE_V, Init0);
+	
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_return);//*/
+	/* Restore parent information. */
+
+	CURRENT_SYMTAB = acc_psymtab;
+	Current_PU_Info = acc_ppuinfo;
+	Current_pu = &Current_PU_Info_pu();
+	Current_Map_Tab = acc_pmaptab;
+	ACC_Pop_Some_Globals( );
+
+	return acc_reduction_proc;
+}
+
+
+/*return the reduction device function name, every type of reduction will be return once.
+For example,  if "+" was generated once, compiler won't generate another "+" kernel. 
+It will just return the previous function name.
+This function is only valid for Kernels outter Loop reduction.
+*/
+static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_map)
+{
+	
+	OPERATOR ReductionOpr = pReduction_map->ReductionOpr;
+	WN* reduction_params = NULL;
+	//reductionmap	
+	ST *old_st = pReduction_map->hostName;
+	INT64 acc_dtype = 
+			GetKernelParamType(old_st);
+	//WN_OFFSET old_offset = WN_offsetx(reduction_node);		
+    TY_IDX ty = ST_type(old_st);
+    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+    //char* localname; //= (char *) alloca(strlen(ST_name(old_st))+10);
+	//sprintf ( localname, "__device_reduction_%s", ST_name(old_st));
+	ST* st_kernel = ACC_Get_Reduction_devices(pReduction_map);
+	if(st_kernel)
+		return st_kernel;
+	
+	
+	//generate new reuction kernels for this type and this operator
+	acc_psymtab = CURRENT_SYMTAB;
+	acc_ppuinfo = Current_PU_Info;
+	acc_pmaptab = Current_Map_Tab;
+	ACC_Push_Some_Globals( );
+	ACC_Create_Reduction_Kernels(PAR_FUNC_ACC_DEVICE, pReduction_map);
+	//////////////////////////////////////////////////////
+	//make local declaress
+    char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
+	ST* st_shared_array = st_input_data; //this is actually a shared memory buffer pointer 
+	
+	
+	//WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+	//				0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	
+	ST* st_tid = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_tid,
+	  Save_Str("tid"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_tid = WN_Ldid(TY_mtype(ST_type(st_tid)), 
+					0, st_tid, ST_type(st_tid));
+
+	//block tid, because blockdim.y may larger than 1.	
+	ST* st_btid = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_btid,
+	  Save_Str("btid"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_btid = WN_Ldid(TY_mtype(ST_type(st_btid)), 
+					0, st_btid, ST_type(st_btid));
+	
+	//my sum
+	ST* st_mySum = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_mySum,
+	  Save_Str("mySum"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty);
+	WN* wn_mySum = WN_Ldid(TY_mtype(ST_type(st_mySum)), 
+					0, st_mySum, ST_type(st_mySum));
+	//nextpow2
+	ST* st_nextpow2 = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_nextpow2,
+	  Save_Str("nextpow2"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));	
+	WN* wn_nextpow2 = WN_Ldid(TY_mtype(ST_type(st_nextpow2)), 
+					0, st_nextpow2, ST_type(st_nextpow2));
+
+	
+	//prevpow2
+	ST* st_prevpow2 = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_prevpow2,
+	  Save_Str("prevpow2"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));	
+	WN* wn_prevpow2 = WN_Ldid(TY_mtype(ST_type(st_prevpow2)), 
+					0, st_prevpow2, ST_type(st_prevpow2));
+	
+	
+	//Set up predefined variable in CUDA
+	WN* wn_threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	WN* wn_threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
+					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
+	WN* wn_threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
+					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
+	
+	WN* wn_blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
+					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
+	WN* wn_blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
+					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
+	WN* wn_blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
+					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
+	
+	WN* wn_blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
+	WN* wn_blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
+					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
+	WN* wn_blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
+					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
+	
+	WN* wn_griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
+					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
+	WN* wn_griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
+					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
+	WN* wn_griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
+					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
+
+
+	
+	WN* Init0 = NULL;
+	//pow2 alignment first
+	//Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(st_nextpow2)), 
+	//				WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockdimy));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_nextpow2)), 0, 
+					st_nextpow2, ST_type(st_nextpow2), WN_COPY_Tree(wn_blockdimx));
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	//gen aligment stmt
+	Gen_Next_Pow2DeviceStmt(wn_nextpow2, acc_reduction_func);
+
+	//prevpow2 = nextpow2 >> 1
+	Init0 = WN_Binary(OPR_ASHR, TY_mtype(ST_type(st_nextpow2)), 
+					WN_COPY_Tree(wn_nextpow2), 
+					WN_Intconst(TY_mtype(ST_type(st_nextpow2)), 1));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_prevpow2)), 0, 
+					st_prevpow2, ST_type(st_prevpow2), Init0);
+
+
+	//tid in the block, btid = threadIdx.y * blockdim.x + threadIdx.x
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+						WN_COPY_Tree(wn_threadidy), WN_COPY_Tree(wn_blockdimx));
+	Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+						Init0, WN_COPY_Tree(wn_threadidx));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_btid)), 0, st_btid, ST_type(st_btid), Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	
+	//tid in single y direction	
+	Init0 = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), WN_COPY_Tree(wn_threadidx));
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);	
+	
+	//blocksize = blockdimx*blockdimy
+	//Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), 
+	//								WN_COPY_Tree(blockdimx), WN_COPY_Tree(blockdimy));
+	//Init0 = WN_Stid(TY_mtype(ST_type(st_blockSize)), 0, st_blockSize, 
+	//								ST_type(st_blockSize), Init0);
+	//WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	//
+	//Init0 = ACC_Get_Init_Value_of_Reduction(ReductionOpr);
+	//Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), Init0);
+	//WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+
+	//
+	
+	WN* wn_IfTest1 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_tid), 
+								WN_COPY_Tree(wn_prevpow2));
+	WN* wn_IfBody1 = WN_CreateBlock();
+	/////////////////////////////////////////////////////////////////////////////////
+	WN* wn_nextIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+							WN_COPY_Tree(wn_tid), WN_COPY_Tree(wn_prevpow2));
+	WN* wn_btidnextIndex = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), 
+							WN_COPY_Tree(wn_btid), WN_COPY_Tree(wn_prevpow2));
+	WN* wn_IfTest11 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_nextIndex), WN_COPY_Tree(wn_blockdimx));
+	WN* wn_IfBody11 = WN_CreateBlock();
+	
+	WN* wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btidnextIndex), st_shared_array);	
+	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
+	
+	WN* wn_shArr2 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btid), st_shared_array);	
+	wn_shArr2 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr2);
+	
+	Init0 = WN_Binary(ReductionOpr, TY_mtype(ty), wn_shArr2, wn_shArr1);
+
+	
+	WN* wn_shArr3 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btid), st_shared_array);
+	wn_shArr3 = WN_Istore(TY_mtype(ty), 0, Make_Pointer_Type(ty), wn_shArr3, Init0);
+	WN_INSERT_BlockLast( wn_IfBody11,  wn_shArr3);
+	WN* wn_ifThenElse = WN_CreateIf(wn_IfTest11, wn_IfBody11, WN_CreateBlock());
+	////////////////////////////////////////////////////////////////////////////////////////
+	WN_INSERT_BlockLast( wn_IfBody1,  wn_ifThenElse);
+	wn_ifThenElse = WN_CreateIf(wn_IfTest1, wn_IfBody1, WN_CreateBlock());
+	////////////////////////////////////////////////////////////////////////////////////////
+	///////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
+	////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
+	//init sum
+	wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btid), st_shared_array);	
+	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
+	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	///////////////////////////////////////////////////////////////////////////////////////////////////////////////
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_shared_array, wn_mySum, 512, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_shared_array, wn_mySum, 256, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_shared_array, wn_mySum, 128, ReductionOpr);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+
+	
+	WN* wn_IfTest2 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_tid)), 
+								WN_COPY_Tree(wn_tid), 
+								WN_Intconst(MTYPE_U4, 32));
+	WN* wn_IfBody2 = WN_CreateBlock();
+	
+    localname = (char *) alloca(strlen(ST_name(old_st))+10);
+	sprintf ( localname, "__smem_%s", ST_name(old_st));
+	Set_TY_is_volatile(ty);
+	TY_IDX ty_pointer = Make_Pointer_Type(ty);
+	ST* st_smem_pointer = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_smem_pointer,
+	  Save_Str(localname),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty_pointer);
+	
+    Init0 = WN_Ldid(Pointer_type, 0, st_shared_array, ST_type(st_shared_array));
+	Init0 = WN_Stid(TY_mtype(ST_type(st_smem_pointer)), 0, 
+					st_smem_pointer, ST_type(st_smem_pointer), Init0);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	Init0 = Gen_ReductionIfElseBlock1_Vector(wn_blockdimx, wn_tid, wn_btid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
+	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
+	WN* wn_ifThenElse2 = WN_CreateIf(wn_IfTest2, wn_IfBody2, WN_CreateBlock());
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse2);
+
+	
+	
+	
+	//Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(WN_st(wn_tid))), 
+	//				WN_COPY_Tree(wn_tid), WN_Intconst(MTYPE_U4, ilimit/2));
+	/*Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), WN_COPY_Tree(wn_threadidy), WN_COPY_Tree(wn_blockdimx));
+	Init0 = ACC_LoadDeviceSharedArrayElem(Init0, st_shared_array);	
+	Init0 = WN_Iload(TY_mtype(TY_pointed(ST_type(st_shared_array))), 0,  
+									TY_pointed(ST_type(st_shared_array)), Init0);
+	
+    WN* wn_return = WN_CreateReturn_Val (OPR_RETURN_VAL, TY_mtype(ST_type(old_st)), MTYPE_V, Init0);
+	
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_return);//*/
+
+	
+	////////////////////////////////////////////////////////////////
+	//restore info
+	//ACC_Transfer_Maps ( acc_pmaptab, acc_cmaptab, acc_reduction_func, 
+	//	  PU_Info_regions_ptr(Current_PU_Info) );
+
+	/* Create a new dependence graph for the child  and move all the 
+	 appropriate vertices from the parent to the child graph */
+
+	//Current_Map_Tab = acc_cmaptab;
+	//ACC_Fix_Dependence_Graph ( acc_ppuinfo, Current_PU_Info, acc_reduction_func); 
+	//Current_Map_Tab = acc_pmaptab;
+
+  
+	/* Restore parent information. */
+
+	CURRENT_SYMTAB = acc_psymtab;
+	Current_PU_Info = acc_ppuinfo;
+	Current_pu = &Current_PU_Info_pu();
+	Current_Map_Tab = acc_pmaptab;
+	ACC_Pop_Some_Globals( );
+
+	return acc_reduction_proc;
+}
+
+/*return the reduction kernels name, every type of reduction will be return once.
+For example,  if "+" was generated once, compiler won't generate another "+" kernel. 
+It will just return the previous function name.
+This function is only valid for Kernels outter Loop reduction.
+*/
+static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_map)
+{
+	
+	OPERATOR ReductionOpr = pReduction_map->ReductionOpr;
+	WN* reduction_params = NULL;
+	//reductionmap	
+	ST *old_st = pReduction_map->hostName;
+	INT64 acc_dtype = 
+			GetKernelParamType(old_st);
+	//WN_OFFSET old_offset = WN_offsetx(reduction_node);		
+    TY_IDX ty = ST_type(old_st);
+    TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+    //char* localname; //= (char *) alloca(strlen(ST_name(old_st))+10);
+	//sprintf ( localname, "__device_reduction_%s", ST_name(old_st));
+	ST* st_kernel = ACC_Get_Reduction_kernels(ReductionOpr, ty);
+	if(st_kernel)
+		return st_kernel;
+	
+	//generate new reuction kernels for this type and this operator
+	acc_psymtab = CURRENT_SYMTAB;
+	acc_ppuinfo = Current_PU_Info;
+	acc_pmaptab = Current_Map_Tab;
+	ACC_Push_Some_Globals( );
+	ACC_Create_Reduction_Kernels(PAR_FUNC_ACC_KERNEL, pReduction_map);
+	//////////////////////////////////////////////////////
+	//make local declaress
+    char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
+	sprintf ( localname, "__sdata_%s", ST_name(old_st));
+	TY_IDX ty_array = Make_Pointer_Type(ty);//Make_Array_Type(TY_mtype(ty), 1, 1024);
+	ST* st_shared_array = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_shared_array,
+	  Save_Str(localname),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty_array);
+	Set_ST_ACC_shared_array(*st_shared_array);
+	
+	
+	//WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+	//				0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	
+	ST* st_tid = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_tid,
+	  Save_Str("tid"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_tid = WN_Ldid(TY_mtype(ST_type(st_tid)), 
+					0, st_tid, ST_type(st_tid));
+	//i
+	ST* st_loop_index = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_loop_index,
+	  Save_Str("i"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_loop_index = WN_Ldid(TY_mtype(ST_type(st_loop_index)), 
+					0, st_loop_index, ST_type(st_loop_index));
+	//
+	ST* st_gridSize = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_gridSize,
+	  Save_Str("gridSize"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  Be_Type_Tbl(MTYPE_U4));
+	WN* wn_gridSize = WN_Ldid(TY_mtype(ST_type(st_gridSize)), 
+					0, st_gridSize, ST_type(st_gridSize));
+	//my sum
+	ST* st_mySum = New_ST(CURRENT_SYMTAB); 
+	ST_Init(st_mySum,
+	  Save_Str("mySum"),
+	  CLASS_VAR,
+	  SCLASS_AUTO,
+	  EXPORT_LOCAL,
+	  ty);
+	WN* wn_mySum = WN_Ldid(TY_mtype(ST_type(st_mySum)), 
+					0, st_mySum, ST_type(st_mySum));
+
+	
+	sprintf ( localname, "is_power2");
+	ST* st_IsPow2 = New_ST( CURRENT_SYMTAB );
+	ST_Init(st_IsPow2,
+			Save_Str("is_power2"),
+			CLASS_VAR,
+			SCLASS_FORMAL,
+			EXPORT_LOCAL,
+			Be_Type_Tbl(MTYPE_U4));
+	WN* wn_IsPow2 = WN_Ldid(TY_mtype(ST_type(st_IsPow2)), 
+					0, st_IsPow2, ST_type(st_IsPow2));
+	
+	
+	//Set up predefined variable in CUDA
+	WN* wn_threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	WN* wn_threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
+					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
+	WN* wn_threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
+					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
+	
+	WN* wn_blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
+					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
+	WN* wn_blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
+					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
+	WN* wn_blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
+					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
+	
+	WN* wn_blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
+	WN* wn_blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
+					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
+	WN* wn_blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
+					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
+	
+	WN* wn_griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
+					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
+	WN* wn_griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
+					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
+	WN* wn_griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
+					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
+	
+	//load parameter: num of element
+	WN* wn_num_elem = WN_Ldid(TY_mtype(ST_type(st_num_elem)), 0, st_num_elem, ST_type(st_num_elem));
+	WN* InitIsPow2 = WN_Binary(OPR_SUB, TY_mtype(ST_type(st_num_elem)), WN_COPY_Tree(wn_num_elem), 
+								WN_Intconst(TY_mtype(ST_type(st_num_elem)), 1));
+	
+	InitIsPow2 = WN_Binary(OPR_BAND, TY_mtype(ST_type(st_IsPow2)), 
+								WN_COPY_Tree(wn_num_elem), InitIsPow2);
+	InitIsPow2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_IsPow2)), 
+						InitIsPow2, WN_Intconst(TY_mtype(ST_type(st_IsPow2)),0));
+	InitIsPow2 = WN_Stid(TY_mtype(ST_type(st_IsPow2)), 0, st_IsPow2, 
+									ST_type(st_IsPow2), InitIsPow2);	
+	WN_INSERT_BlockLast( acc_reduction_func,  InitIsPow2);
+
+	
+	WN* Init0 = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), WN_COPY_Tree(wn_threadidx));
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 	WN* wn_blocksize = WN_Ldid(TY_mtype(ST_type(st_blocksize)), 0, st_blocksize, ST_type(st_blocksize));
-	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), WN_COPY_Tree(blockidx), WN_COPY_Tree(wn_blocksize));
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), WN_COPY_Tree(wn_blockidx), WN_COPY_Tree(wn_blocksize));
 	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), Init0,  WN_Intconst(MTYPE_U4, 2));
-	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockIdx_x)), Init0,  WN_COPY_Tree(threadidx));
+	Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(glbl_blockIdx_x)), Init0,  WN_COPY_Tree(wn_threadidx));
 	Init0 = WN_Stid(TY_mtype(ST_type(st_loop_index)), 0, st_loop_index, ST_type(st_loop_index), Init0);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
 	
 	//WN* wn_gridSizes = WN_Ldid(TY_mtype(ST_type(st_blocksize)), 0, st_blocksize, ST_type(st_blocksize));
-	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(griddimx), WN_COPY_Tree(wn_blocksize));
+	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), WN_COPY_Tree(wn_griddimx), WN_COPY_Tree(wn_blocksize));
 	Init0 = WN_Binary(OPR_MPY, TY_mtype(ST_type(glbl_blockDim_x)), Init0,  WN_Intconst(MTYPE_U4, 2));
 	Init0 = WN_Stid(TY_mtype(ST_type(st_gridSize)), 0, st_gridSize, ST_type(st_gridSize), Init0);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
@@ -11227,14 +13382,11 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node)
 	//Begin calculation
 	WN* wn_loadWhileBlock = WN_CreateBlock();
 
-	//load parameter: num of element
-	WN* wn_IsPow2 = WN_Ldid(TY_mtype(ST_type(st_isPow2)), 0, st_isPow2, ST_type(st_isPow2));
-	WN* wn_num_elem = WN_Ldid(TY_mtype(ST_type(st_num_elem)), 0, st_num_elem, ST_type(st_num_elem));
 	WN* wn_whileTest = WN_Relational (OPR_LT, TY_mtype(ST_type(st_loop_index)), 
 								WN_COPY_Tree(wn_loop_index), 
 								WN_COPY_Tree(wn_num_elem));
 	//while body
-	WN* wn_IfTest1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_isPow2)), 
+	WN* wn_IfTest1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_IsPow2)), 
 								WN_COPY_Tree(wn_IsPow2), 
 								WN_Intconst(MTYPE_U4, 1));
 	Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_loop_index)), 
@@ -11337,7 +13489,7 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(WN* reduction_node)
 	Init0 = WN_Iload(TY_mtype(TY_pointed(ST_type(st_shared_array))), 0,  
 									TY_pointed(ST_type(st_shared_array)), Init0);
 	
-	WN* Init1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(blockidx), st_output_data);	
+	WN* Init1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_blockidx), st_output_data);	
 	Init1 = WN_Istore(TY_mtype(TY_pointed(ST_type(st_output_data))), 0, 
 					ST_type(st_output_data), Init1, Init0);
 	WN_INSERT_BlockLast( wn_IfBody3,  Init1);

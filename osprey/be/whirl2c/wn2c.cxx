@@ -1445,14 +1445,15 @@ WN2C_address_add(TOKEN_BUFFER tokens,
        * assignment.  Do the offset using (char*), and cast the result
        * to a (void*).
        */
-      top_level_expr = FALSE;
+      //top_level_expr = FALSE;
       //WEI: cast to expr_ty instead of void *
-      WN2C_append_cast(tokens, expr_ty, FALSE);
+      //deleted, it is not necessary.
+      //WN2C_append_cast(tokens, expr_ty, FALSE);
 
-      if (TY_Is_Pointer(wn0_ty))
-	 wn0_ty = Stab_Pointer_To(Stab_Mtype_To_Ty(MTYPE_U1));
-      else
-	 wn1_ty = Stab_Pointer_To(Stab_Mtype_To_Ty(MTYPE_U1));
+      //if (TY_Is_Pointer(wn0_ty))
+	 //wn0_ty = Stab_Pointer_To(Stab_Mtype_To_Ty(MTYPE_U1));
+      //else
+	 //wn1_ty = Stab_Pointer_To(Stab_Mtype_To_Ty(MTYPE_U1));
    }
    else
    {

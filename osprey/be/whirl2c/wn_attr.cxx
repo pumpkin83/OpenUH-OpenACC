@@ -621,7 +621,9 @@ WN_Tree_Type(const WN *wn)
 				       WN_kid1(wn),
 				       TY_pointed(ty)) == NULL)
 	    {
-	       ty = Stab_Mtype_To_Ty(WN_opc_rtype(wn));
+	       //why return scalar var? just return the pointer type ty
+	       //ty = Stab_Mtype_To_Ty(WN_opc_rtype(wn));
+	       break;
 	    }
 #endif /* BUILD_WHIRL2C */
 	 }
