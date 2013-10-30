@@ -963,6 +963,11 @@ I-xall		;	FTN	ffe	self
         "enable the accelerator directives (same as -acc)"
 -s2s    toggle(&acckind,NORMAL_ACC100);      ALL wgen,be   "-s2s"
         "enable OpenACC source-to-source translation strategy."
+-rdglobal    toggle(&acckind,NORMAL_ACC100);      ALL be   "-rdglobal"
+        "enable OpenACC reduction using global memory, default is shared memory."
+-rdrolling    toggle(&acckind,NORMAL_ACC100);      ALL be   "-rdrolling"
+        "enable OpenACC reduction using rolling strategy, default is unrolling"
+
 -memsim			;		ALL	N	"-LNO:mem_sim=TRUE -lmemsim"
 	""
 

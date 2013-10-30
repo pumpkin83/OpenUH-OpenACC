@@ -718,14 +718,14 @@ static const OPC2CNAME_MAP WN2C_Opc2cname_Map[] =
   {OPC_BCIOR, "||"},
   {OPC_I4CIOR, "||"},
 // << WHIRL 0.30: replaced OPC_LAND, OPC_LIOR, OPC_CAND, OPC_CIOR by OPC_B and OP_I4 variants
-  {OPC_I4SHL, "_I4SHL"},
-  {OPC_U8SHL, "_U8SHL"},
-  {OPC_I8SHL, "_I8SHL"},
-  {OPC_U4SHL, "_U4SHL"},
-  {OPC_I4ASHR, "_I4ASHR"},
-  {OPC_U8ASHR, "_U8ASHR"},
-  {OPC_I8ASHR, "_I8ASHR"},
-  {OPC_U4ASHR, "_U4ASHR"},
+  {OPC_I4SHL, "<<"},
+  {OPC_U8SHL, "<<"},
+  {OPC_I8SHL, "<<"},
+  {OPC_U4SHL, "<<"},
+  {OPC_I4ASHR, ">>"},
+  {OPC_U8ASHR, ">>"},
+  {OPC_I8ASHR, ">>"},
+  {OPC_U4ASHR, ">>"},
   {OPC_I4LSHR, "_I4LSHR"},
   {OPC_U8LSHR, "_U8LSHR"},
   {OPC_I8LSHR, "_I8LSHR"},
@@ -1166,6 +1166,7 @@ static const OPC2CNAME_MAP WN2C_Opc2cname_Map[] =
 #endif /* TARG_X8664 */
 // << WHIRL 0.30: Replaced OPC_T1{EQ,NE,GT,GE,LT,LE} by OP_BT1 and OPC_I4T1 variants
 }; /* WN2C_Opc2Cname_Map */
+
 
 static bool 
 WN2C_is_void_ptr (TY_IDX idx) {

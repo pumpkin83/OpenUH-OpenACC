@@ -1015,6 +1015,7 @@ BOOL Enable_Coarray = FALSE; /* -deepak */
 /* back end phases options */
 BOOL run_ACCS2S = FALSE;		    /* run code generator */
 BOOL Enable_UHACC = FALSE;		    /* run OpenACC generator */
+UINT32 Enable_UHACCReductionFlag = 0;  /*reduction flags: 0bit-global/shared memory, 1bit-rolling/unrolling*/
 BOOL Run_lno = FALSE;		    /* run loop-nest optimizer */
 BOOL Run_wopt = FALSE;		    /* run WHIRL global optimizer */
 BOOL Run_preopt = FALSE;	    /* run WHIRL preopt optimizer */

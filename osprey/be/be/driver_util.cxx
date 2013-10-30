@@ -412,7 +412,15 @@ Process_Command_Line (INT argc, char **argv)
 					      DEF_O_LEVEL, argv[i] ); 
 		opt_set = TRUE;
 		break;
-
+		case 'r':			
+		if (!strcmp( cp, "dglobal" )) {
+		  Enable_UHACCReductionFlag |= 1;
+		  break;
+		}
+		else if (!strcmp( cp, "drolling" )) {
+		  Enable_UHACCReductionFlag |= 1<<1;
+		  break;
+		}
 	    case 's':
 		if (strcmp (cp, "how") == 0) {
 		    Show_Progress = TRUE;

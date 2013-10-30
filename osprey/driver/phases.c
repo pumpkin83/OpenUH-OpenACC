@@ -281,6 +281,12 @@ add_implied_string (string_list_t *list, int iflag, int flag, phases_t phase)
 			add_string(list, "-s2s");
 			compiling_acc_s2s = TRUE;
 		}
+		else if (strcmp(iname, "-rdglobal") == 0 && (phase == P_be)) {
+			add_string(list, "-rdglobal");
+		}
+		else if (strcmp(iname, "-rdrolling") == 0 && (phase == P_be)) {
+			add_string(list, "-rdrolling");
+		}
 		else if (strncmp (iname, "-O", 2) == 0 && (phase == P_gcpp && compiling_acc)) 
 		{
 			return;

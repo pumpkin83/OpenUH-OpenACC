@@ -745,6 +745,7 @@ extern BOOL Enable_Coarray; /* -deepak */
 #ifdef BACK_END
 extern BOOL Enable_UHACC;
 extern BOOL run_ACCS2S;
+extern UINT32 Enable_UHACCReductionFlag;
 extern BOOL Run_lno;		    /* run loop-nest optimizer */
 extern BOOL Run_lego;               /* run lego-lowering */
 extern BOOL Run_lego_given;         /* was run lego-lowering given/not */
