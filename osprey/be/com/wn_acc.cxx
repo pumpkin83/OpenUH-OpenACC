@@ -12528,17 +12528,27 @@ static WN* Gen_ReductionIfElseBlock1(WN* wn_blocksize, WN* wn_tid, ST* st_shared
 	Init0 = WN_Binary(ReductionOpr, TY_mtype(ST_type(WN_st(wn_mySum))), WN_COPY_Tree(wn_mySum), Init0);
 	Init0 = WN_Stid(TY_mtype(ST_type(WN_st(wn_mySum))), 0, WN_st(wn_mySum),
 								ST_type(WN_st(wn_mySum)), Init0);	
-	WN_INSERT_BlockLast(wn_InnerBlock,  Init0);
-
-
-	Init0 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
-	Init0 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), Init0, WN_COPY_Tree(wn_mySum));	
-	WN_INSERT_BlockLast(wn_InnerBlock,  Init0);
-	Init0 = WN_CreateIf(wn_IfInnerTest, wn_InnerBlock, WN_CreateBlock());
-	WN_INSERT_BlockLast(wn_OuterBlock,  Init0);
+	WN* Init1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	Init1 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), 
+								Init1, WN_COPY_Tree(wn_mySum));	
+	
 	if(ilimit > 64)
+	{
+		WN_INSERT_BlockLast(wn_InnerBlock,  Init0);
+		WN_INSERT_BlockLast(wn_InnerBlock,  Init1);
+		Init0 = WN_CreateIf(wn_IfInnerTest, wn_InnerBlock, WN_CreateBlock());
+		WN_INSERT_BlockLast(wn_OuterBlock,  Init0);
 		WN_INSERT_BlockLast(wn_OuterBlock,  wn_CallSyncThreads);
-	Init0 = WN_CreateIf(wn_IfOuterTest, wn_OuterBlock, WN_CreateBlock());
+		Init0 = WN_CreateIf(wn_IfOuterTest, wn_OuterBlock, WN_CreateBlock());
+	}
+	else
+	{
+		WN_INSERT_BlockLast(wn_OuterBlock,  Init0);
+		WN_INSERT_BlockLast(wn_OuterBlock,  Init1);
+		Init0 = WN_CreateIf(wn_IfOuterTest, wn_OuterBlock, WN_CreateBlock());
+	}
+
+	
 	return Init0;
 }
 
@@ -13149,7 +13159,7 @@ static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	//////////////////////////////////////////////////////
 	//make local declaress
     char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
-	sprintf ( localname, "__sdata_%s", ST_name(old_st));
+	/*sprintf ( localname, "__sdata_%s", ST_name(old_st));
 	TY_IDX ty_array = Make_Pointer_Type(ty);//Make_Array_Type(TY_mtype(ty), 1, 1024);
 	ST* st_shared_array = New_ST(CURRENT_SYMTAB); 
 	ST_Init(st_shared_array,
@@ -13158,7 +13168,8 @@ static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	  SCLASS_AUTO,
 	  EXPORT_LOCAL,
 	  ty_array);
-	Set_ST_ACC_shared_array(*st_shared_array);
+	Set_ST_ACC_shared_array(*st_shared_array);*/
+	ST* st_shared_array = st_input_data;
 	
 	
 	//WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
