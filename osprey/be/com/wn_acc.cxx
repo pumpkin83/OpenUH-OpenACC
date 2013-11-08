@@ -4397,8 +4397,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   WN* wn_innerforloop = WN_CreateDO(wn_Innerloopidame, wn_InnerIndexInit, wn_Inner_for_test, wn_InnerIndexStep, acc_loopinfo.acc_forloop[1].acc_loopbody, NULL);
 
 	   //handling nonperfect loopnest
+	   //WN* wn_prehand_nodes = acc_loopinfo.acc_forloop[0].wn_prehand_nodes;
 	   if(acc_loopinfo.acc_forloop[0].wn_prehand_nodes)
+	   {
 	   		WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+			//wn_prehand_nodes = WN_next(wn_prehand_nodes);
+	   }
 	    /********************************************************************************/
 	    /********************************************************************************/
 	    RDIdx = 0;
@@ -4436,8 +4440,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	    /********************************************************************************/
 	   
 	   //handling nonperfect loopnest
+	   //WN* wn_afterhand_nodes = acc_loopinfo.acc_forloop[0].wn_afterhand_nodes;
 	   if(acc_loopinfo.acc_forloop[0].wn_afterhand_nodes)
-	   	WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_afterhand_nodes);
+	   {
+	   		WN_INSERT_BlockLast( wn_OutterLoopbody,	acc_loopinfo.acc_forloop[0].wn_afterhand_nodes);
+			//wn_afterhand_nodes = WN_next(wn_afterhand_nodes);
+	   }
 
 	   //Create Outer forloop
 	   WN* wn_Outerloopidame = WN_CreateIdname(0,st_OuterIndex);
@@ -4603,8 +4611,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	   WN* wn_innerforloop = WN_CreateDO(wn_Innerloopidame, wn_InnerIndexInit, wn_Inner_for_test, wn_InnerIndexStep, acc_loopinfo.acc_forloop[2].acc_loopbody, NULL);
 
 	   //handling nonperfect loopnest
+	   //WN* wn_prehand_nodes = acc_loopinfo.acc_forloop[1].wn_prehand_nodes;
 	   if(acc_loopinfo.acc_forloop[1].wn_prehand_nodes)
-	   	WN_INSERT_BlockLast( MidDOBlock,	acc_loopinfo.acc_forloop[1].wn_prehand_nodes);
+	   {
+	   		WN_INSERT_BlockLast( MidDOBlock, acc_loopinfo.acc_forloop[1].wn_prehand_nodes);
+			//wn_prehand_nodes = WN_next(wn_prehand_nodes);
+	   }
 		
 	    /********************************************************************************/
 	    /********************************************************************************/
@@ -4643,17 +4655,25 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 		}
 	    /********************************************************************************/
 	   
-	   //handling nonperfect loopnest
+	   //handling nonperfect loopnest	   
+	   //WN* wn_afterhand_nodes = acc_loopinfo.acc_forloop[1].wn_afterhand_nodes;
 	   if(acc_loopinfo.acc_forloop[1].wn_afterhand_nodes)
-	   	WN_INSERT_BlockLast( MidDOBlock,	acc_loopinfo.acc_forloop[1].wn_afterhand_nodes);
+	   {
+	   		WN_INSERT_BlockLast( MidDOBlock, acc_loopinfo.acc_forloop[1].wn_afterhand_nodes);
+			//wn_afterhand_nodes = WN_next(wn_afterhand_nodes);
+	   }
 
 	   //create Mid for loop	   
 	   WN* wn_Midloopidame = WN_CreateIdname(0,st_MidIndex);
 	   WN* wn_Midforloop = WN_CreateDO(wn_Midloopidame, wn_MidIndexInit, wn_Mid_for_test, wn_MidIndexStep, MidDOBlock, NULL);
 
-	   //handling nonperfect loopnest
+	   //handling nonperfect loopnest 
+	   //wn_prehand_nodes = acc_loopinfo.acc_forloop[0].wn_prehand_nodes;
 	   if(acc_loopinfo.acc_forloop[0].wn_prehand_nodes)
-	   	WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+	   {
+	   		WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_prehand_nodes);
+			//wn_prehand_nodes = WN_next(wn_prehand_nodes);
+	   }
 	    /********************************************************************************/
 	    /********************************************************************************/
 		RDIdx = 0;
@@ -4693,8 +4713,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	    /********************************************************************************/
 	   
 	   //handling nonperfect loopnest
+	   //wn_afterhand_nodes = acc_loopinfo.acc_forloop[0].wn_afterhand_nodes;
 	   if(acc_loopinfo.acc_forloop[0].wn_afterhand_nodes)
-	   	WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_afterhand_nodes);
+	   {
+	   		WN_INSERT_BlockLast( OuterDOBlock,	acc_loopinfo.acc_forloop[0].wn_afterhand_nodes);
+			//wn_afterhand_nodes = WN_next(wn_afterhand_nodes);
+	   }
 	   
 
 	   //Create Outer forloop
@@ -6265,15 +6289,26 @@ static void ACC_Extract_ACC_LoopNest_Info( WN * tree )
 			{
 				if(wn_handlist == NULL)
 				{
-					wn_cur_node = wn_handlist = WN_COPY_Tree(cur_node);
-					WN_next(wn_handlist) = NULL;
-					WN_prev(wn_handlist) = NULL;
+					//wn_cur_node = wn_handlist = WN_COPY_Tree(cur_node);
+					wn_handlist = WN_CreateBlock();
+					wn_cur_node = WN_COPY_Tree(cur_node);
+					WN_next(wn_cur_node) = NULL;
+					WN_prev(wn_cur_node) = NULL;
+					WN_INSERT_BlockLast(wn_handlist, wn_cur_node);
+					//WN_next(wn_handlist) = NULL;
+					//WN_prev(wn_handlist) = NULL;
 				}
 				else
 				{
 					//wn_handlist = WN_COPY_Tree(cur_node);
-					WN_next(wn_cur_node) = WN_COPY_Tree(cur_node);
-					WN_prev(WN_next(wn_cur_node)) = wn_cur_node;
+					//WN_next(wn_cur_node) = WN_COPY_Tree(cur_node);
+					//WN_prev(WN_next(wn_cur_node)) = wn_cur_node;
+					//wn_cur_node = WN_next(wn_cur_node);
+					//WN_next(wn_cur_node) = NULL;					
+					wn_cur_node = WN_COPY_Tree(cur_node);
+					WN_next(wn_cur_node) = NULL;
+					WN_prev(wn_cur_node) = NULL;
+					WN_INSERT_BlockLast(wn_handlist, wn_cur_node);
 				}
 			 }
 	  }
@@ -7196,10 +7231,20 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 					else
 						reductionmap.deviceName = st_reduction_buffer;
 				}
-				if(acc_reduction_rolling == ACC_RD_UNROLLING)
-					reductionmap.reduction_kenels = ACC_GenerateWorkerReduction_unrolling(&reductionmap);
-				else
-					reductionmap.reduction_kenels = ACC_GenerateWorkerReduction_rolling(&reductionmap);
+				if(reductionmap.acc_stmt_location == ACC_MIDDER_LOOP)
+				{
+					if(acc_reduction_rolling == ACC_RD_UNROLLING)
+						reductionmap.reduction_kenels = ACC_GenerateWorkerReduction_unrolling(&reductionmap);
+					else
+						reductionmap.reduction_kenels = ACC_GenerateWorkerReduction_rolling(&reductionmap);
+				}
+				else if(reductionmap.acc_stmt_location == ACC_INNER_LOOP)
+				{
+					if(acc_reduction_rolling == ACC_RD_UNROLLING)
+						reductionmap.reduction_kenels = ACC_GenerateWorkerVectorReduction_unrolling(&reductionmap);
+					else
+						reductionmap.reduction_kenels = ACC_GenerateWorkerVectorReduction_rolling(&reductionmap);
+				}
 				acc_loopinfo.acc_forloop[1].reductionmap[iRdIdx] = reductionmap;
 				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
 				iRdIdx ++;
@@ -7536,7 +7581,6 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	//Scan and translate the loop region. Attaching the general nodes as well.
 	for (cur_node = WN_first(tree); cur_node; cur_node = next_node) 
 	{
-
 		prev_node = WN_prev(cur_node);
 		next_node = WN_next(cur_node);
 
@@ -12793,11 +12837,11 @@ static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduct
 	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), Init0);*/
 
 
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
 	
@@ -12822,17 +12866,17 @@ static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduct
 	Init0 = WN_Stid(TY_mtype(ST_type(st_smem_pointer)), 0, 
 					st_smem_pointer, ST_type(st_smem_pointer), Init0);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockSize, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
 	WN* wn_ifThenElse2 = WN_CreateIf(wn_IfTest2, wn_IfBody2, WN_CreateBlock());
 	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse2);
@@ -13340,11 +13384,11 @@ static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 	
 	/////////////////////////////////////////////////////////////////////////////////
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
 	
@@ -13369,17 +13413,17 @@ static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	Init0 = WN_Stid(TY_mtype(ST_type(st_smem_pointer)), 0, 
 					st_smem_pointer, ST_type(st_smem_pointer), Init0);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimy, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
 	WN* wn_ifThenElse2 = WN_CreateIf(wn_IfTest2, wn_IfBody2, WN_CreateBlock());
 	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse2);
@@ -13753,7 +13797,7 @@ static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_ma
 					0, st_prevpow2, ST_type(st_prevpow2));
 	
     localname = (char *) alloca(strlen(ST_name(old_st))+30);
-	sprintf ( localname, "__smem_local%s", ST_name(old_st));
+	sprintf ( localname, "__smem_local_%s", ST_name(old_st));
 	TY_IDX ty_pointer = Make_Pointer_Type(ty);
 	ST* st_smemlocal_pointer = New_ST(CURRENT_SYMTAB); 
 	ST_Init(st_smemlocal_pointer,
@@ -13861,16 +13905,16 @@ static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_ma
 								WN_COPY_Tree(wn_nextIndex), WN_COPY_Tree(wn_blockdimx));
 	WN* wn_IfBody11 = WN_CreateBlock();
 	
-	WN* wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_nextIndex), st_shared_array);	
+	WN* wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_nextIndex), st_smemlocal_pointer);	
 	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
 	
-	WN* wn_shArr2 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	WN* wn_shArr2 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_smemlocal_pointer);	
 	wn_shArr2 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr2);
 	
 	Init0 = WN_Binary(ReductionOpr, TY_mtype(ty), wn_shArr2, wn_shArr1);
 
 	
-	WN* wn_shArr3 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);
+	WN* wn_shArr3 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_smemlocal_pointer);
 	wn_shArr3 = WN_Istore(TY_mtype(ty), 0, Make_Pointer_Type(ty), wn_shArr3, Init0);
 	WN_INSERT_BlockLast( wn_IfBody11,  wn_shArr3);
 	WN* wn_ifThenElse = WN_CreateIf(wn_IfTest11, wn_IfBody11, WN_CreateBlock());
@@ -13882,16 +13926,16 @@ static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	///////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
 	////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
 	//init sum
-	wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
+	wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_smemlocal_pointer);	
 	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
 	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////////
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smemlocal_pointer, wn_mySum, 512, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_shared_array, wn_mySum, 256, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smemlocal_pointer, wn_mySum, 256, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_shared_array, wn_mySum, 128, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smemlocal_pointer, wn_mySum, 128, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
 	
@@ -13912,21 +13956,21 @@ static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	  EXPORT_LOCAL,
 	  ty_pointer);
 	
-    Init0 = WN_Ldid(Pointer_type, 0, st_shared_array, ST_type(st_shared_array));
+    Init0 = WN_Ldid(Pointer_type, 0, st_smemlocal_pointer, ST_type(st_smemlocal_pointer));
 	Init0 = WN_Stid(TY_mtype(ST_type(st_smem_pointer)), 0, 
 					st_smem_pointer, ST_type(st_smem_pointer), Init0);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 64, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 32, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 16, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 8, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 4, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
-	Init0 = Gen_ReductionIfElseBlock1(wn_blockdimx, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
+	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smem_pointer, wn_mySum, 2, ReductionOpr);
 	WN_INSERT_BlockLast( wn_IfBody2,  Init0);
 	WN* wn_ifThenElse2 = WN_CreateIf(wn_IfTest2, wn_IfBody2, WN_CreateBlock());
 	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse2);
