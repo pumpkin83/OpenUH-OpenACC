@@ -12829,6 +12829,7 @@ static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduct
 	//Init0 = ACC_Get_Init_Value_of_Reduction(ReductionOpr);
 	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Gen_Sync_Threads());
 	//mySum += g_idata[btid];
 	/*Init0 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_btid), st_input_data);
 	Init0 = WN_Iload(TY_mtype(TY_pointed(ST_type(st_input_data))), 0,  
@@ -13375,13 +13376,14 @@ static ST* ACC_GenerateWorkerReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	WN_INSERT_BlockLast( wn_IfBody1,  wn_ifThenElse);
 	wn_ifThenElse = WN_CreateIf(wn_IfTest1, wn_IfBody1, WN_CreateBlock());
 
-	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse);	
+	WN_INSERT_BlockLast( acc_reduction_func,  wn_ifThenElse);
 	////////////////////////////////////////////////\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\	
 	//init sum
 	wn_shArr1 = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(wn_tid), st_shared_array);	
 	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
 	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Gen_Sync_Threads());	
 	
 	/////////////////////////////////////////////////////////////////////////////////
 	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_shared_array, wn_mySum, 512, ReductionOpr);
@@ -13930,6 +13932,7 @@ static ST* ACC_GenerateVectorReduction_unrolling(ACC_ReductionMap* pReduction_ma
 	wn_shArr1 = WN_Iload(TY_mtype(ty), 0,  ty, wn_shArr1);
 	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), wn_shArr1);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Gen_Sync_Threads());
 	///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 	Init0 = Gen_ReductionIfElseBlock1(wn_prevpow2, wn_tid, st_smemlocal_pointer, wn_mySum, 512, ReductionOpr);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
