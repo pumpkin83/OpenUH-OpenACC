@@ -7401,7 +7401,7 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 				//call the acc malloc
 				WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
 		
-				reductionmap.reduction_kenels = NULL;//ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
+				reductionmap.reduction_kenels = ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
 				acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx] = reductionmap;				
 				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
 				iRdIdx ++;
@@ -7535,7 +7535,7 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 				//call the acc malloc
 				WN_INSERT_BlockLast( wn_replace_block, GenReductionMalloc(st_device, alloc_size));				
 				reductionmap.looptype = acc_loopinfo.acc_forloop[0].looptype;
-				reductionmap.reduction_kenels = NULL; //ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
+				reductionmap.reduction_kenels = ACC_GenerateReduction_Kernels_TopLoop(&reductionmap);
 				acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx] = reductionmap;				
 				acc_reduction_tab_map[reductionmap.hostName] = reductionmap;
 				iRdIdx ++;
@@ -12778,6 +12778,7 @@ static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduct
 					WN_Intconst(TY_mtype(ST_type(st_nextpow2)), 1));
 	Init0 = WN_Stid(TY_mtype(ST_type(st_prevpow2)), 0, 
 					st_prevpow2, ST_type(st_prevpow2), Init0);
+	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
 
 	//tid = threadIdx.y * blockdim.x + threadIdx.x
