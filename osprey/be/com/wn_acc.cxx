@@ -436,7 +436,7 @@ typedef enum ACC_LOOP_LEVEL
 	ACC_INNER_LOOP
 }ACC_LOOP_LEVEL;
 
-typedef struct
+typedef struct ACC_ReductionMap
 {
 	ST* hostName;//host reduction ST
 	ST* deviceName; //device memory ST, allocated in host side
@@ -457,6 +457,25 @@ typedef struct
 	ST* st_backupValue;		
 	WN* wn_backupValue;	
 	WN* wn_backupStmt;
+	ACC_ReductionMap()
+	{
+		hostName = NULL;
+		deviceName = NULL;
+		st_Inkernel = NULL;
+		reduction_kenels = NULL;
+		st_private_var = NULL;
+		wn_private_var = NULL;
+		st_local_array = NULL;
+		wn_IndexOpr = NULL;
+		wn_assignment2Array = NULL;
+		wn_initialAssign = NULL;
+		wn_assignBack2PrivateVar = NULL;
+		st_num_of_element = NULL;
+		st_backupValue = NULL;
+		wn_backupValue = NULL;
+		wn_backupStmt = NULL;
+	}
+	
 }ACC_ReductionMap;
 
 typedef struct ACC_Reduction_Item
@@ -2344,6 +2363,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				{
 					////////////////////////////////////////////
 					//ST* reduction_param = acc_shared_memory_for_reduction_device[typeID];
+					reductionmap.st_Inkernel = acc_st_shared_memory;
 					
 				}
 				
@@ -2411,6 +2431,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				}
 				else if(acc_reduction_mem == ACC_RD_SHARED_MEM)
 				{
+					reductionmap.st_Inkernel = acc_st_shared_memory;
 				}
 				reductionmap.looptype = acc_loopinfo.acc_forloop[2].looptype;
 				ACC_VAR_TABLE var;
@@ -7320,6 +7341,7 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 		else if(acc_loopinfo.loopnum == 2
 				&& acc_loopinfo.acc_forloop[0].reductionmap.size())
 		{
+			iRdIdx = 0;
 			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
 			{
 				ACC_ReductionMap reductionmap = acc_loopinfo.acc_forloop[0].reductionmap[iRdIdx];
@@ -7492,6 +7514,7 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 		else if(acc_loopinfo.loopnum == 1 
 				&& acc_loopinfo.acc_forloop[0].reductionmap.size())
 		{
+			iRdIdx = 0;
 			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
 			{
 				//if(acc_loopinfo.acc_forloop[0].)			
