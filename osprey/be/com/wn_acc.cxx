@@ -2363,8 +2363,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				{
 					////////////////////////////////////////////
 					//ST* reduction_param = acc_shared_memory_for_reduction_device[typeID];
-					reductionmap.st_Inkernel = acc_st_shared_memory;
-					
+					reductionmap.st_Inkernel = acc_st_shared_memory;					
 				}
 				
 				reductionmap.looptype = acc_loopinfo.acc_forloop[1].looptype;
@@ -14331,7 +14330,7 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_ma
 	ST_Init(st_IsPow2,
 			Save_Str("is_power2"),
 			CLASS_VAR,
-			SCLASS_FORMAL,
+			SCLASS_AUTO,
 			EXPORT_LOCAL,
 			Be_Type_Tbl(MTYPE_U4));
 	WN* wn_IsPow2 = WN_Ldid(TY_mtype(ST_type(st_IsPow2)), 
