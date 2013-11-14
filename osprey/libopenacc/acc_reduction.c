@@ -334,7 +334,7 @@ void __accr_final_reduction_algorithm(void* result, void *d_idata, char* kernel_
     __accr_push_kernel_param_pointer(&__device_result);
     __accr_push_kernel_param_scalar(&size);
     __accr_push_kernel_param_scalar(&block_size);
-    __accr_set_shared_mem_size(block_size*type_size);
+    //__accr_set_shared_mem_size(block_size*type_size);
     __accr_launchkernel(kernel_name, cu_filename, -2);
     
     __accr_memout_d2h(__device_result, result, type_size, 0, -2); 
