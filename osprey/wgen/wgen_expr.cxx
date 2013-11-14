@@ -1341,7 +1341,10 @@ WGEN_Array_Expr(gs_t exp,
     if (st != base_st) {
       DevWarn ("Encountered VLA at line %d", lineno);
       Is_True(ST_ofst(st) == 0, ("TODO: ST_ofst is not 0"));
-      wn = WN_Ldid (Pointer_Mtype, 0, base_st, Make_Pointer_Type(*ty_idx));
+      if(!g_bOffloadRegion)
+      	wn = WN_Ldid (Pointer_Mtype, 0, base_st, ST_type (base_st));
+      else
+	wn = WN_Ldid (Pointer_Mtype, 0, st, ST_type (st));
       if (component_offset != NULL) { // TODO: use ILDA instead
         wn = WN_Binary(OPR_ADD, Pointer_Mtype, wn, component_offset);
       }
@@ -8893,13 +8896,6 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_SQRTL:
 #endif
 	       	if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-			//This is for OpenACC, by daniel
-		if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-		{
-			whirl_4ACC_S2S = TRUE;
-			break;
-			//wn = WGEN_Expand_ACC_Intrinsic4S2S(exp, ty_idx, ret_mtype);
-		}
 			
 		else if (! gs_flag_errno_math(program)) {
 		  arg_wn = WGEN_Expand_Expr (gs_tree_value (gs_tree_operand (exp, 1)));
@@ -8924,12 +8920,6 @@ WGEN_Expand_Expr (gs_t exp,
 		    cvt_to = ret_mtype;
 		    ret_mtype = MTYPE_F10;
 		  }
-		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                   break;
                 }
 #endif
@@ -8964,12 +8954,6 @@ WGEN_Expand_Expr (gs_t exp,
 		    cvt_to = ret_mtype;
 		    ret_mtype = MTYPE_F10;
 		  }
-			//This is for OpenACC, by daniel		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                   break;
                 }
 #endif
@@ -8980,13 +8964,6 @@ WGEN_Expand_Expr (gs_t exp,
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8COS;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cos'");
 				
-			//This is for OpenACC, by daniel
-		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
 #ifdef KEY
@@ -8998,14 +8975,6 @@ WGEN_Expand_Expr (gs_t exp,
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ACOS;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
 		  intrinsic_op = TRUE;
-			//This is for OpenACC, by daniel
-			
-		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
 		}
                 break;
 
@@ -9018,12 +8987,6 @@ WGEN_Expand_Expr (gs_t exp,
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'asin'");
 		  intrinsic_op = TRUE;
 		}
-			//This is for OpenACC, by daniel	  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_ATAN:
@@ -9033,12 +8996,6 @@ WGEN_Expand_Expr (gs_t exp,
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ATAN;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan'");
                 intrinsic_op = TRUE;
-			//This is for OpenACC, by daniel		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_ATAN2:
@@ -9049,12 +9006,6 @@ WGEN_Expand_Expr (gs_t exp,
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan2'");
                 intrinsic_op = TRUE;
 				
-		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_SINH:
@@ -9065,12 +9016,6 @@ WGEN_Expand_Expr (gs_t exp,
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sinh'");
                 intrinsic_op = TRUE;
 				
-		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_COSH:
@@ -9082,11 +9027,6 @@ WGEN_Expand_Expr (gs_t exp,
                 intrinsic_op = TRUE;
 				
 		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_TANH:
@@ -9098,11 +9038,6 @@ WGEN_Expand_Expr (gs_t exp,
                 intrinsic_op = TRUE;
 				
 		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_LOG10:
@@ -9115,11 +9050,6 @@ WGEN_Expand_Expr (gs_t exp,
 		  intrinsic_op = TRUE;
 		}
 		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_LOG:
@@ -9133,11 +9063,6 @@ WGEN_Expand_Expr (gs_t exp,
 		  intrinsic_op = TRUE;
 		}
 		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_EXP:
@@ -9153,11 +9078,6 @@ WGEN_Expand_Expr (gs_t exp,
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'exp'");
 		intrinsic_op = TRUE;
 		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
 	      case GSBI_BUILT_IN_POW:
@@ -9179,11 +9099,6 @@ WGEN_Expand_Expr (gs_t exp,
 		  intrinsic_op = TRUE;
 		}
 		  	
-				if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-				{
-					whirl_4ACC_S2S = TRUE;
-					intrinsic_op = FALSE;
-				}
 		break;
 
 	      case GSBI_BUILT_IN_POWI: // bug 10963
