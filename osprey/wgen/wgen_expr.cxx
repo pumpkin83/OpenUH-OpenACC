@@ -1146,6 +1146,36 @@ WGEN_Save_Expr (gs_t save_exp,
   return wn;
 } /* WGEN_Save_Expr */
 
+
+static WN * 
+WGEN_Expand_Math_MAX_OpenACC(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
+{
+ 
+  gs_t arglist = gs_tree_operand (exp, 1);
+  WN *arg_wn0 = WGEN_Expand_Expr (gs_tree_value (arglist));	
+  WN *arg_wn1 = WGEN_Expand_Expr (gs_tree_value (gs_tree_chain (arglist)));
+
+  //arg_wn = WN_Ldid(ret_mtype, 0, arg_st, ty_idx);
+  //WN *wn = WN_CreateExp1 (OPR_SQRT, ret_mtype, MTYPE_V, arg_wn);
+  WN *wn = WN_Binary(OPR_MAX, ret_mtype, arg_wn0, arg_wn1);
+  return wn;
+}
+
+
+static WN * 
+WGEN_Expand_Math_MIN_OpenACC(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
+{
+  gs_t arglist = gs_tree_operand (exp, 1);
+  WN *arg_wn0 = WGEN_Expand_Expr (gs_tree_value (arglist));	
+  WN *arg_wn1 = WGEN_Expand_Expr (gs_tree_value (gs_tree_chain (arglist)));
+
+  //arg_wn = WN_Ldid(ret_mtype, 0, arg_st, ty_idx);
+  //WN *wn = WN_CreateExp1 (OPR_SQRT, ret_mtype, MTYPE_V, arg_wn);
+  WN *wn = WN_Binary(OPR_MIN, ret_mtype, arg_wn0, arg_wn1);
+  return wn;
+}
+
+
 static WN * 
 WGEN_Expand_Math_Errno_Sqrt(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
 {
@@ -1202,9 +1232,27 @@ WGEN_Expand_Math_Errno_Sqrt(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
   return WN_Ldid(ret_mtype, 0, res_st, ty_idx);
 }
 
+static WN * 
+WGEN_Expand_ACC_Offload4CUDA(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
+{
+  WN *arg_wn = WGEN_Expand_Expr (gs_tree_value (gs_tree_operand (exp, 1)));
+  //ST *arg_st = Gen_Temp_Symbol(ty_idx, "__math_arg");
+  //////////////////////////////////////////////////////////////
+//#ifdef FE_GNU_4_2_0
+//  WGEN_add_pragma_to_enclosing_regions (WN_PRAGMA_LOCAL, arg_st);
+//#endif
+  //WN *stmt = WN_Stid(ret_mtype, 0, arg_st, ty_idx, arg_wn);
+  //WGEN_Stmt_Append(stmt, Get_Srcpos());
+
+  //arg_wn = WN_Ldid(ret_mtype, 0, arg_st, ty_idx);
+  WN *wn = WN_CreateExp1 (OPR_SQRT, ret_mtype, MTYPE_V, arg_wn);
+
+
+  return wn;
+}
 
 static WN * 
-WGEN_Expand_ACC_Intrinsic4S2S(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
+WGEN_Expand_ACC_S2S(gs_t exp, TY_IDX ty_idx, TYPE_ID ret_mtype)
 {
   WN *arg_wn = WGEN_Expand_Expr (gs_tree_value (gs_tree_operand (exp, 1)));
   ST *arg_st = Gen_Temp_Symbol(ty_idx, "__math_arg");
@@ -8901,8 +8949,35 @@ WGEN_Expand_Expr (gs_t exp,
 		  arg_wn = WGEN_Expand_Expr (gs_tree_value (gs_tree_operand (exp, 1)));
 		  wn = WN_CreateExp1 (OPR_SQRT, ret_mtype, MTYPE_V, arg_wn);
 		}
-		else wn = WGEN_Expand_Math_Errno_Sqrt(exp, ty_idx, ret_mtype);
+		else if(g_bOffloadRegion)
+			wn = WGEN_Expand_ACC_Offload4CUDA(exp, ty_idx, ret_mtype);
+		else if(g_bOpenACCS2S_flag)
+			wn = WGEN_Expand_ACC_S2S(exp, ty_idx, ret_mtype);
+		else 
+			wn = WGEN_Expand_Math_Errno_Sqrt(exp, ty_idx, ret_mtype);
 		whirl_generated = TRUE;
+		break;
+
+		case GSBI_BUILT_IN_FMIN:
+        case GSBI_BUILT_IN_FMINF:
+	       	if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
+			
+		else if (g_bOffloadRegion) 
+		{
+			wn = WGEN_Expand_Math_MIN_OpenACC(exp, ty_idx, ret_mtype);
+			whirl_generated = TRUE;
+		}
+		break;
+		
+		case GSBI_BUILT_IN_FMAX:
+        case GSBI_BUILT_IN_FMAXF:
+	       	if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
+			
+		else if (g_bOffloadRegion) 
+		{
+			wn = WGEN_Expand_Math_MAX_OpenACC(exp, ty_idx, ret_mtype);
+			whirl_generated = TRUE;
+		}
 		break;
 
 #ifdef KEY
@@ -8926,17 +9001,18 @@ WGEN_Expand_Expr (gs_t exp,
 #ifdef KEY // bug 11305
                 if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 #endif
-                if (ret_mtype == MTYPE_F4) iopc = INTRN_F4SIN;
+				if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4SIN;
+	                else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8SIN;
+	                else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sin'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4SIN;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8SIN;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sin'");
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 				
-			
-		  	
-			if(g_bOffloadRegion || g_bOpenACCS2S_flag)
-			{
-				whirl_4ACC_S2S = TRUE;
-				intrinsic_op = FALSE;
-			}
                 break;
 
               case GSBI_BUILT_IN_COS:
@@ -8960,9 +9036,17 @@ WGEN_Expand_Expr (gs_t exp,
 #ifdef KEY // bug 11305
                 if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 #endif
-                if (ret_mtype == MTYPE_F4) iopc = INTRN_F4COS;
+				if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4COS;
+	                else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8COS;
+	                else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cos'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4COS;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8COS;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cos'");
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 				
                 break;
 
@@ -8971,10 +9055,20 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_ACOSF:
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 		if (! gs_flag_errno_math(program)) {  // Bug 14262
-		  if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ACOS;
-		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ACOS;
-		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
-		  intrinsic_op = TRUE;
+			if(g_bOffloadRegion)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4ACOS;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ACOS;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
+			}
+			else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ACOS;
+			else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ACOS;
+			else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
+			intrinsic_op = TRUE;
+			if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				intrinsic_op = FALSE;
+			
+		  	
 		}
                 break;
 
@@ -8982,49 +9076,89 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_ASINF:
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 		if (! gs_flag_errno_math(program)) {  // Bug 14262
-		  if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ASIN;
+		  	if(g_bOffloadRegion)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4ASIN;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ASIN;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'asin'");
+			}
+		  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ASIN;
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ASIN;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'asin'");
 		  intrinsic_op = TRUE;
+		  if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+			intrinsic_op = FALSE;
 		}
                 break;
 
               case GSBI_BUILT_IN_ATAN:
               case GSBI_BUILT_IN_ATANF:
                  if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-                 if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ATAN;
+                 if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4ATAN;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ATAN;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan'");
+				}
+		  		else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ATAN;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ATAN;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan'");
                 intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
                 break;
 
               case GSBI_BUILT_IN_ATAN2:
               case GSBI_BUILT_IN_ATAN2F:
                  if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-                 if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ATAN2;
+                 if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4ATAN2;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ATAN2;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan2'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ATAN2;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ATAN2;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan2'");
                 intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 				
                 break;
 
               case GSBI_BUILT_IN_SINH:
               case GSBI_BUILT_IN_SINHF:
                  if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-                 if (ret_mtype == MTYPE_F4) iopc = INTRN_F4SINH;
+                 if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4SINH;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8SINH;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sinh'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4SINH;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8SINH;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sinh'");
                 intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 				
                 break;
 
               case GSBI_BUILT_IN_COSH:
               case GSBI_BUILT_IN_COSHF:
                  if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-                 if (ret_mtype == MTYPE_F4) iopc = INTRN_F4COSH;
+                 if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4COSH;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8COSH;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cosh'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4COSH;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8COSH;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cosh'");
                 intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 				
 		  	
                 break;
@@ -9032,10 +9166,18 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_TANH:
               case GSBI_BUILT_IN_TANHF:
                  if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-                 if (ret_mtype == MTYPE_F4) iopc = INTRN_F4TANH;
+                 if(g_bOffloadRegion)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4TANH;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8TANH;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'tanh'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4TANH;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8TANH;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'tanh'");
                 intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 				
 		  	
                 break;
@@ -9044,10 +9186,18 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_LOG10F:
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 		if (! gs_flag_errno_math(program)) {  // Bug 14262
-		  if (ret_mtype == MTYPE_F4) iopc = INTRN_F4LOG10;
+             if(g_bOffloadRegion)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4LOG10;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8LOG10;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log10'");
+			}
+		  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4LOG10;
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8LOG10;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log10'");
 		  intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 		}
 		  	
                 break;
@@ -9057,10 +9207,18 @@ WGEN_Expand_Expr (gs_t exp,
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 
 		if (! gs_flag_errno_math(program)) {  // Bug 14262
-		  if (ret_mtype == MTYPE_F4) iopc = INTRN_F4LOG;
+		  if(g_bOffloadRegion)
+		  {
+			if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4LOG;
+		    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8LOG;
+		    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log'");
+		  }
+		  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4LOG;
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8LOG;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log'");
 		  intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 		}
 		  	
                 break;
@@ -9072,11 +9230,19 @@ WGEN_Expand_Expr (gs_t exp,
 		// double (so if it is without side-effects, optimizer can 
 		// remove it)
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-
-                if (ret_mtype == MTYPE_F4) iopc = INTRN_F4EXP;
+		
+				if(g_bOffloadRegion)
+				{
+				  if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4EXP;
+				  else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8EXP;
+				  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'exp'");
+				}
+                else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4EXP;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8EXP;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'exp'");
-		intrinsic_op = TRUE;
+				intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
 		  	
                 break;
 
@@ -9092,14 +9258,22 @@ WGEN_Expand_Expr (gs_t exp,
                 // exp[lf]?(3)'s are), we only permit ret_mtype MTYPE_F8 here.
 
                 if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
-		if (! gs_flag_errno_math(program)) {  // Bug 14262
-                  if (ret_mtype == MTYPE_F4) iopc = INTRN_F4EXPEXPR;
-                  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8EXPEXPR;
-		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'pow'");
-		  intrinsic_op = TRUE;
-		}
+				if (! gs_flag_errno_math(program)) {  // Bug 14262
+						  if(g_bOffloadRegion)
+						  {
+							if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4EXPEXPR;
+						    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8EXPEXPR;
+						    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'pow'");
+						  }
+		                  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4EXPEXPR;
+		                  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8EXPEXPR;
+				  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'pow'");
+				  intrinsic_op = TRUE;
+				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+					intrinsic_op = FALSE;
+				}
 		  	
-		break;
+				break;
 
 	      case GSBI_BUILT_IN_POWI: // bug 10963
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
@@ -10152,11 +10326,11 @@ WGEN_Expand_Expr (gs_t exp,
 	    }
 	  }
 
-	if(whirl_4ACC_S2S)
-	{
-			wn = WGEN_Expand_ACC_Intrinsic4S2S(exp, ty_idx, ret_mtype);
-			whirl_generated = TRUE;
-	}
+	//if(whirl_4ACC_S2S)
+	//{
+			//wn = WGEN_Expand_ACC_Intrinsic4S2S(exp, ty_idx, ret_mtype);
+			//whirl_generated = TRUE;
+	//}
           if (whirl_generated) {
             break;
           }
