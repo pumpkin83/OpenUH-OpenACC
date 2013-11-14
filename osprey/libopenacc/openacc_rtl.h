@@ -126,11 +126,26 @@ extern void __accr_set_vector_num_z(int z);
 
 extern void __accr_set_default_gang_vector(void);
 
+extern void __accr_set_shared_mem_size(unsigned int size);
+
+extern void __accr_set_default_shared_mem_size(void);
+
 extern void __accr_reset_default_gang_vector(void);
+
+extern int __accr_get_num_workers();
+
+extern int __accr_get_num_vectors();
+
+extern int __accr_get_total_num_gangs(void);
+
+extern int __accr_get_total_gangs_workers();
+
+extern int __accr_get_total_num_vectors();
 
 extern void __accr_launchkernel(char* szKernelName, char* szKernelLib, int async_expr);
 
-extern void __accr_final_reduction_algorithm(double* result, double *d_idata, int type);
+//extern void __accr_final_reduction_algorithm(double* result, double *d_idata, int type);
+extern void __accr_final_reduction_algorithm(void* result, void *d_idata, char* kernel_name, unsigned int size, unsigned int type_size);
 
 extern void acc_init(acc_device_t);
 
