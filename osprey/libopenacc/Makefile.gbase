@@ -84,7 +84,7 @@ LCINCS += $(addprefix -I, $(ACCINCL))
 #CFLAGS += -fgnu89-inline
 
 
-CFILES = acc_context.c acc_data.c acc_kernel.c  acc_util.c hashmap.c vector.c synch.c acc_log.c
+CFILES = acc_context.c acc_data.c acc_kernel.c acc_reduction.c acc_util.c hashmap.c vector.c synch.c acc_log.c
 
 
 #ifeq ($(BUILD_COMPILER), GNU)

@@ -8,11 +8,12 @@
 int gangs[3];
 int vectors[3];
 /*global kernel file name*/
-static char cu_filename[512];
+char cu_filename[512];
+unsigned int shared_size = 0;
 
 /*global kernel module and function*/
-static CUmodule cu_module;
-static CUfunction cu_function;
+CUmodule cu_module;
+CUfunction cu_function;
 
 void __accr_set_gangs(int x, int y, int z)
 {
@@ -60,21 +61,44 @@ void __accr_set_vector_num_z(int z)
 
 void __accr_set_default_gang_vector(void)
 {
-	//gangs[0] = 64;
-	gangs[0] = 7813;
-	//gangs[1] = 16;
-	//gangs[1] = 1022;
+	gangs[0] = 192;
 	gangs[1] = 1;
 	gangs[2] = 1;
 
-	//vectors[0] = 32;
-	//vectors[1] = 16;
 	vectors[0] = 128;
-	vectors[1] = 1;
+	vectors[1] = 8;
 	vectors[2] = 1;
 	
 	DEBUG(("Set gangs: %d, %d, %d", gangs[0], gangs[1], gangs[2]));
 	DEBUG(("Set vectors: %d, %d, %d", vectors[0], vectors[1], vectors[2]));
+}
+
+
+/* used in parallel region */
+int __accr_get_num_workers()
+{
+    return vectors[1];
+}
+
+/* used in parallel region */
+int __accr_get_num_vectors()
+{
+    return vectors[0];
+}
+
+int __accr_get_total_num_gangs(void)
+{
+    return gangs[0]*gangs[1]*gangs[2];
+}
+
+int __accr_get_total_gangs_workers()
+{
+    return (__accr_get_total_num_gangs()*__accr_get_num_workers());
+}
+
+int __accr_get_total_num_vectors()
+{
+    return (__accr_get_total_num_gangs()*__accr_get_num_workers()*__accr_get_num_vectors());
 }
 
 void __accr_reset_default_gang_vector(void)
@@ -86,6 +110,16 @@ void __accr_reset_default_gang_vector(void)
     vectors[0] = 0;
     vectors[1] = 0;
     vectors[2] = 0;
+}
+
+void __accr_set_shared_mem_size(unsigned int size)
+{
+    shared_size = size;
+}
+
+void __accr_set_default_shared_mem_size()
+{
+    shared_size = __acc_gpu_config->max_threads_per_block*sizeof(double); 
 }
 
 /*
@@ -129,7 +163,12 @@ void __accr_launchkernel(char* szKernelName, char* szKernelLib, int async_expr)
 		//printf("Kernel file name: %s\n", szKernelLib);	
 		ret = cuModuleGetFunction(&cu_function, cu_module, szKernelName);	
 		CUDA_CHECK(ret);
-	}
+	}else
+    {
+        /*the file name are the same, but the kernel function may be different*/
+		ret = cuModuleGetFunction(&cu_function, cu_module, szKernelName);	
+		CUDA_CHECK(ret);
+    }
 	
 	args_count = vector_length(param_list);
 	args = (void**)malloc(args_count*sizeof(void*));
@@ -172,7 +211,7 @@ void __accr_launchkernel(char* szKernelName, char* szKernelLib, int async_expr)
 	{
 		ret = cuLaunchKernel(cu_function, gangs[0], gangs[1], gangs[2], 
 						     vectors[0], vectors[1], vectors[2], 
-						     0, 
+						     shared_size, 
 						     NULL, args, NULL);
 		CUDA_CHECK(ret);
 	}else if(async_expr == 0)
@@ -184,7 +223,7 @@ void __accr_launchkernel(char* szKernelName, char* szKernelLib, int async_expr)
 		
 		ret = cuLaunchKernel(cu_function, gangs[0], gangs[1], gangs[2], 
 						     vectors[0], vectors[1], vectors[2], 
-						     0, 
+						     shared_size, 
 						     async_streams[MODULE_BASE], args, NULL);
 		CUDA_CHECK(ret);
 	}else
@@ -199,7 +238,7 @@ void __accr_launchkernel(char* szKernelName, char* szKernelLib, int async_expr)
 		
 		ret = cuLaunchKernel(cu_function, gangs[0], gangs[1], gangs[2], 
 						     vectors[0], vectors[1], vectors[2], 
-						     0, 
+						     shared_size, 
 						     async_streams[stream_pos], args, NULL);
 		CUDA_CHECK(ret);
 	}
