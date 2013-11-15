@@ -8655,6 +8655,22 @@ c_parser_acc_clause_reduction (c_parser *parser, tree list)
 	case CPP_OR_OR:
 	  code = TRUTH_ORIF_EXPR;
 	  break;
+	case CPP_NAME:
+		{
+			const char *p = IDENTIFIER_POINTER (c_parser_peek_token (parser)->value);
+			if (!strcmp ("min", p))
+				  code = MIN_EXPR;
+			else if(!strcmp ("max", p))
+				  code = MAX_EXPR;
+			else
+			{	
+				c_parser_error (parser,
+			  		"expected %<min%> or %<max%>");
+	  			c_parser_skip_until_found (parser, CPP_CLOSE_PAREN, 0);
+	  			return list;
+			}
+		}
+	  break;
 	default:
 	  c_parser_error (parser,
 			  "expected %<+%>, %<*%>, %<-%>, %<&%>, "

@@ -9093,21 +9093,13 @@ c_finish_acc_clauses (tree clauses)
 		case PLUS_EXPR:
 		case MULT_EXPR:
 		case MINUS_EXPR:
-		  break;
 		case BIT_AND_EXPR:
-		  r_name = "&";
-		  break;
 		case BIT_XOR_EXPR:
-		  r_name = "^";
-		  break;
 		case BIT_IOR_EXPR:
-		  r_name = "|";
-		  break;
 		case TRUTH_ANDIF_EXPR:
-		  r_name = "&&";
-		  break;
 		case TRUTH_ORIF_EXPR:
-		  r_name = "||";
+		case MAX_EXPR:
+		case MIN_EXPR:
 		  break;
 		default:
 		  gcc_unreachable ();

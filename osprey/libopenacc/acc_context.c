@@ -4,6 +4,7 @@
  */
 
 #include "acc_context.h"
+#include "acc_kernel.h"
 
 
 context_t *context;
@@ -33,6 +34,9 @@ void acc_init(acc_device_t device_type)
 	 * 12 elements, the last is reserved for default stream
 	 */
 	MODULE_BASE = 11;
+
+    /* set up the default shared memory size */
+    __accr_set_default_shared_mem_size();
 }
 
 int __acc_gpu_config_create(acc_gpu_config_t** _config)

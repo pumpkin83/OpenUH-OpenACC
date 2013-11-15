@@ -848,11 +848,13 @@ bool ACCIsInKernelRegion = false;
 
 void expand_acc_start_kernel (gs_t stmt)
 {
+  g_bOffloadRegion = TRUE;
   WGEN_expand_acc_start_kernel (stmt);
   ACCIsInKernelRegion = true;
   WGEN_Expand_Stmt (gs_acc_kernels_body(stmt));
   ACCIsInKernelRegion = false;
   expand_acc_end_kernel ();
+  g_bOffloadRegion = FALSE;
 }
 
 void expand_acc_end_kernel( )
@@ -866,11 +868,11 @@ extern void WGEN_ACC_Expand_DO (gs_t);
 void
 expand_acc_start_forloop (gs_t stmt)
 {
-	 g_bOffloadRegion = TRUE;
+	 //g_bOffloadRegion = TRUE;
      WGEN_expand_acc_start_forloop (stmt);
      WGEN_ACC_Expand_DO (stmt);
      expand_acc_end_forloop ();
-	 g_bOffloadRegion = FALSE;
+	 //g_bOffloadRegion = FALSE;
 }
 
 

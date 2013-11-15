@@ -1040,6 +1040,17 @@ ACC_Create_Func_DST ( char * st_name )
 }
 
 
+static BOOL ACC_Is_Same_ST(ST* stA, ST* stB)
+{
+	if(stA == stB)
+		return TRUE;
+	//this is for Variabe Length Arrays
+	if(((ST_base(stA) != stA) && (ST_base(stA)==stB)) 
+			|| ((ST_base(stB) != stB)&&(ST_base(stB)==stA)))
+		return TRUE;
+	return FALSE;
+}
+
 /*  Create either a preg or a temp depending on presence of C++ exception
     handling.  */
 
