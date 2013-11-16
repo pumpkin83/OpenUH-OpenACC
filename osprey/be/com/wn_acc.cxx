@@ -958,7 +958,7 @@ static WN* ACC_Process_DataRegion( WN * tree );
 static WN *LaunchKernel (int index, WN* wn_replace_block, BOOL bParallelRegion);
 static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_map);
 static WN* ACC_LoadDeviceSharedArrayElem(WN* wn_array_offset, ST* st_array);
-static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr);
+static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr, TYPE_ID rtype);
 static char* ACC_Get_ScalarName_of_Reduction(TYPE_ID typeID);
 static WN* ACC_Gen_Call_Local_Reduction(ST* st_device_func, ST* st_inputdata);
 static ST* ACC_GenerateWorkerVectorReduction_unrolling(ACC_ReductionMap* pReduction_map);
@@ -3351,7 +3351,7 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 				WN* wn_array_loc, *wn_stmt;
 				int initvalue = 0;
 				TY_IDX ty_red = ST_type(reductionMap.hostName);
-				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr, TY_mtype(ty_red));
 				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
 	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
 				reductionMap.wn_initialAssign = wn_reduction_init;
@@ -3495,7 +3495,7 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 				WN* wn_array_loc, *wn_stmt;
 				int initvalue = 0;
 				//Init reduction private data
-				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr, TY_mtype(ty_red));
 				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
 	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
 	   			
@@ -3642,7 +3642,7 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 				int initvalue = 0;
 				//TY_IDX ty_red = ST_type(reductionMap.hostName);
 				//Init reduction private data
-				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr, TY_mtype(ty_red));
 				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
 	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
 	   			reductionMap.wn_initialAssign = wn_reduction_init;	
@@ -3739,7 +3739,7 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 				WN* wn_array_loc, *wn_stmt;
 				int initvalue = 0;
 				TY_IDX ty_red = ST_type(reductionMap.hostName);
-				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr, TY_mtype(ty_red));
 				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
 	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
 				reductionMap.wn_initialAssign = wn_reduction_init;
@@ -3871,7 +3871,7 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 				int initvalue = 0;
 				//TY_IDX ty_red = ST_type(reductionMap.hostName);
 				//Init reduction private data
-				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr, TY_mtype(ty_red));
 				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
 	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
 	   			
@@ -3940,7 +3940,7 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 				WN* wn_array_loc, *wn_stmt1;
 				int initvalue = 0;
 				TY_IDX ty_red = ST_type(reductionMap.hostName);
-				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr);
+				wn_reduction_init = ACC_Get_Init_Value_of_Reduction(reductionMap.ReductionOpr, TY_mtype(ty_red));
 				wn_reduction_init = WN_Stid(TY_mtype(ST_type(reductionMap.st_private_var)), 0, 
 	   					reductionMap.st_private_var, ST_type(reductionMap.st_private_var), wn_reduction_init); 
 				reductionMap.wn_initialAssign = wn_reduction_init;
@@ -12445,7 +12445,7 @@ static WN* ACC_LoadDeviceSharedArrayElem(WN* wn_array_offset, ST* st_array)
 }
 
 /*Init value of reduction*/
-static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr)
+static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr, TYPE_ID rtype)
 {
 	WN* wn_init = NULL;
 	switch(ReductionOpr)
@@ -12459,11 +12459,23 @@ static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr)
 		break;
 	case OPR_MAX:
 		//return min INT_MIN
-		wn_init = WN_Intconst(MTYPE_U4, INT_MIN);
+		if(rtype>=MTYPE_I1 && rtype>MTYPE_I8)
+			wn_init = WN_Intconst(MTYPE_I4, INT_MIN);
+		else if(rtype>=MTYPE_U1 && rtype>MTYPE_U8)
+			wn_init = WN_Intconst(MTYPE_U4, 0);
+		else if(rtype>=MTYPE_F4 && rtype>MTYPE_F16)
+			wn_init = WN_Floatconst(MTYPE_F4, INT_MIN);
+			
 		break;
 	case OPR_MIN:
 		//return max INT_MAX
-		wn_init = WN_Intconst(MTYPE_U4, INT_MAX);
+		if(rtype>=MTYPE_I1 && rtype>MTYPE_I8)
+			wn_init = WN_Intconst(MTYPE_I4, INT_MAX);
+		else if(rtype>=MTYPE_U1 && rtype>MTYPE_U8)
+			wn_init = WN_Intconst(MTYPE_U4, UINT_MAX);
+		else if(rtype>=MTYPE_F4 && rtype>MTYPE_F16)
+			wn_init = WN_Floatconst(MTYPE_F4, INT_MAX);
+		
 		break;
 	case OPR_BAND:
 		//return ~0
@@ -14407,7 +14419,7 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_ma
 	Init0 = WN_Stid(TY_mtype(ST_type(st_gridSize)), 0, st_gridSize, ST_type(st_gridSize), Init0);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
-	Init0 = ACC_Get_Init_Value_of_Reduction(ReductionOpr);
+	Init0 = ACC_Get_Init_Value_of_Reduction(ReductionOpr, TY_mtype(ty));
 	Init0 = WN_Stid(TY_mtype(ST_type(st_mySum)), 0, st_mySum, ST_type(st_mySum), Init0);
 	WN_INSERT_BlockLast( acc_reduction_func,  Init0);
 
