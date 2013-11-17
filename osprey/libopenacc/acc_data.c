@@ -10,6 +10,8 @@ map_t map;
 cudaStream_t async_streams[12] = {NULL};
 int MODULE_BASE;
 
+static int __accr_remove_device_from_hashmap(void* pDevice);
+
 void* __acc_malloc_handler(unsigned int size)
 {
 	void *ptr;
@@ -46,7 +48,7 @@ void acc_free(void* ptr)
 void __accr_malloc_on_device(void* pHost, void** pDevice, unsigned int size)
 {
 	CUDART_CHECK( cudaMalloc(pDevice, size) );
-
+    //printf("enter malloc\n");
 	/*add the data in the hashmap*/
 	param_t *param = (param_t*)malloc(sizeof(param_t));
 	param->host_addr = pHost;
@@ -55,12 +57,20 @@ void __accr_malloc_on_device(void* pHost, void** pDevice, unsigned int size)
 	if(map == NULL)
 		map = hashmap_new();
 	hashmap_put(map, hashmap_length(map), param);
+    //printf("leave malloc\n");
 }
 
 void __accr_free_on_device(void* pDevice)
 {
 	if(pDevice)
+    {
+        /* since it will no longer be on the device, 
+         * it should be removed from the hash table */
+        //__accr_remove_device_from_hashmap(pDevice);
+       
+        /* release the device memory */ 
 		CUDART_CHECK( cudaFree(pDevice) );
+    }
 }
 
 void __accr_memin_h2d(void* pHost, 
@@ -325,22 +335,59 @@ int __accr_device_addr_present(void* pDevice)
 		}
 	}
 
-	ERROR(("ERROR: The given address is not present on the device"));
+	ERROR(("ERROR: The given address %p is not present on the device", pDevice));
 	return 0;
+}
+
+/*
+ * given a device address, remove it from the hashmap
+ *
+ */
+static int __accr_remove_device_from_hashmap(void* pDevice)
+{
+	int key, map_length;
+	param_t *param;
+    
+	/*if the map has not created yet*/
+	if(map == NULL)
+	{
+		ERROR(("ERROR: The data map has not created yet"));
+		return 0;
+	}
+	
+	map_length = hashmap_length(map);
+	for(key=0; key<map_length; key++)
+	{
+		if(hashmap_get(map, key, (void**)&param) == MAP_OK)
+		{
+			if(param->device_addr == pDevice)
+            {
+				if(hashmap_remove(map, key) == MAP_OK)
+                {
+                    DEBUG(("Removed device address %p from the hashmap", pDevice));
+                    return 1;
+                }
+            }
+		}
+	}
+
+	ERROR(("ERROR: The given address %p is not present on the device", pDevice));
+    return 0;
 }
 
 void __accr_reduction_buff_malloc(void** pDevice, int type)
 {
 	unsigned unit_size, size;
-	unsigned threads;
+	//unsigned threads;
 
-	threads = gangs[0]*gangs[1]*gangs[2]*vectors[0]*vectors[1]*vectors[2];
+	//threads = gangs[0]*gangs[1]*gangs[2]*vectors[0]*vectors[1]*vectors[2];
 
 	DEBUG(("Number of threads for reduction: %u", threads));
 
-	if(type == 10)
-		unit_size = sizeof(double);
-	size = threads*unit_size;
+	//if(type == 10)
+	//	unit_size = sizeof(double);
+	//size = threads*unit_size;
+	size = type;
 
 	CUDART_CHECK( cudaMalloc(pDevice, size) );
 }

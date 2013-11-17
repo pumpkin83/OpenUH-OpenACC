@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include "hashmap.h"
-#include "synch.h"
+//#include "synch.h"
 
 #define INITIAL_SIZE 1024
 
@@ -15,7 +15,7 @@ typedef struct _hashmap_map{
 	int table_size;
 	int size;
 	hashmap_element *data;
-	semaphore_t lock;
+//	semaphore_t lock;
 } hashmap_map;
 
 /*Return an empyty hashmap, or NULL on failure*/
@@ -27,10 +27,10 @@ map_t hashmap_new()
 	m->data = (hashmap_element*)calloc(INITIAL_SIZE, sizeof(hashmap_element));
 	if(!m->data) goto err;
 
-	m->lock = (semaphore_t)semaphore_create();
-	if(!m->lock) goto err;
+//	m->lock = (semaphore_t)semaphore_create();
+//	if(!m->lock) goto err;
 
-	semaphore_initialize(m->lock, 1);
+//	semaphore_initialize(m->lock, 1);
 
 	m->table_size = INITIAL_SIZE;
 	m->size = 0;
@@ -134,7 +134,7 @@ int hashmap_put(map_t in, int key, any_t value)
 	m = (hashmap_map*)in;
 
 	/*lock for concurrency*/
-	semaphore_P(m->lock);
+//	semaphore_P(m->lock);
 
 	/* find a place to put our value*/
 	index = hashmap_hash(in, key);
@@ -142,7 +142,7 @@ int hashmap_put(map_t in, int key, any_t value)
 	{
 		if(hashmap_rehash(in) == MAP_OMEM)
 		{
-			semaphore_V(m->lock);
+//			semaphore_V(m->lock);
 			return MAP_OMEM;
 		}
 		index = hashmap_hash(in, key);
@@ -154,7 +154,7 @@ int hashmap_put(map_t in, int key, any_t value)
 	m->size++;
 
 	/*unlock*/
-	semaphore_V(m->lock);
+//	semaphore_V(m->lock);
 
 	return MAP_OK;
 }
@@ -169,7 +169,7 @@ int hashmap_get(map_t in, int key, any_t* arg)
 	m = (hashmap_map*)in;
 
 	/* lock for concurrency */
-	semaphore_P(m->lock);
+//	semaphore_P(m->lock);
 
 	/* find data location */
 	curr = hashmap_hash_int(m, key);
@@ -180,14 +180,14 @@ int hashmap_get(map_t in, int key, any_t* arg)
 		if(m->data[curr].key == key && m->data[curr].in_use == 1)
 		{
 			*arg = (any_t*)(m->data[curr].data);
-			semaphore_V(m->lock);
+//			semaphore_V(m->lock);
 			return MAP_OK;
 		}
 		curr = (curr + 1) % m->table_size;
 	}
 
 	arg = NULL;
-	semaphore_V(m->lock);
+//	semaphore_V(m->lock);
 
 	return MAP_MISSING;
 }
@@ -207,7 +207,7 @@ int hashmap_iterate(map_t in, PFany f, any_t item)
 		return MAP_MISSING;
 
 	/*lock for concurrency*/
-	semaphore_P(m->lock);
+//	semaphore_P(m->lock);
 
 	/* linear probing */
 	for(i=0; i<m->table_size; i++)
@@ -218,13 +218,13 @@ int hashmap_iterate(map_t in, PFany f, any_t item)
 			int status = f(item, data);
 			if(status != MAP_OK)
 			{
-				semaphore_V(m->lock);
+//				semaphore_V(m->lock);
 				return status;
 			}
 		}
 	}
 
-	semaphore_V(m->lock);
+//	semaphore_V(m->lock);
 	return MAP_OK;
 }
 
@@ -239,7 +239,7 @@ int hashmap_remove(map_t in, int key)
 
 	m = (hashmap_map*)in;
 
-	semaphore_P(m->lock);
+//	semaphore_P(m->lock);
 
 	curr = hashmap_hash_int(m, key);
 
@@ -254,14 +254,14 @@ int hashmap_remove(map_t in, int key)
 
 			/*reduce the size*/
 			m->size--;
-			semaphore_V(m->lock);
+//			semaphore_V(m->lock);
 			return MAP_OK;
 		}
 		
 		curr = (curr + 1) % m->table_size;
 	}
 	
-	semaphore_V(m->lock);
+//	semaphore_V(m->lock);
 
 	return MAP_MISSING;
 }
@@ -271,7 +271,7 @@ void hashmap_free(map_t in)
 {
 	hashmap_map *m = (hashmap_map*)in;
 	free(m->data);
-	semaphore_destroy(m->lock);
+//	semaphore_destroy(m->lock);
 }
 
 /* return the length of the hashmap */
