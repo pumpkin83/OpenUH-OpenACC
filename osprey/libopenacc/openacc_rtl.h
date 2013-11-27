@@ -68,7 +68,7 @@ extern void __accr_push_kernel_param_double(double* dbValue);
 
 extern void __accr_clean_param_list();
 
-extern void __accr_get_device_addr(void* pHostAddr, 
+extern int __accr_get_device_addr(void* pHostAddr, 
 								   void** pDeviceAddr, 
 								   unsigned int istart, 
 								   unsigned int isize);

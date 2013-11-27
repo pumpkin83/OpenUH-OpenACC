@@ -14,7 +14,7 @@ TARGET = libOpenACC.so
 
 SRCDIR = .
 #SRCS = $(wildcard $(SRCDIR)/*.c)
-SRCS = acc_context.c acc_data.c acc_kernel.c  acc_util.c hashmap.c vector.c 
+SRCS = acc_context.c acc_data.c acc_kernel.c  acc_util.c acc_hashmap.c vector.c 
 OBJS = $(patsubst %.c, %.o, $(SRCS))
 
 all: $(TARGET)
