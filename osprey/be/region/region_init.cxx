@@ -1103,7 +1103,7 @@ RINIT::Process_region(WN *wtmp, WN *block, INT32 level, RID *root,
 
   REGION_kind_to_type(wtmp, rid);
 
-  if (!RID_TYPE_mp(rid))
+  if (!RID_TYPE_mp(rid)&&!RID_TYPE_acc(rid))
     _nregions++;	// only count non-MP regions for LNO
 
   Is_True(RID_type(rid) != RID_TYPE_undefined,
@@ -1146,7 +1146,7 @@ RINIT::Process_region(WN *wtmp, WN *block, INT32 level, RID *root,
       WN_opcode(wtmp2) != OPC_GOTO && WN_opcode(wtmp2) != OPC_RETURN &&
       WN_opcode(wtmp2) != OPC_REGION_EXIT) {
 #else 
-  if (wtmp2 && !RID_TYPE_mp(rid) && !RID_TYPE_eh(rid) && 
+  if (wtmp2 && !RID_TYPE_mp(rid) && !RID_TYPE_acc(rid) && !RID_TYPE_eh(rid) && 
       WN_opcode(wtmp2) != OPC_GOTO && WN_opcode(wtmp2) != OPC_RETURN &&
       WN_opcode(wtmp2) != OPC_REGION_EXIT) {
 #endif

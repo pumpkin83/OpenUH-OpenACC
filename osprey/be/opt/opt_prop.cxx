@@ -1142,6 +1142,8 @@ COPYPROP::Prop_var(CODEREP *x, BB_NODE *curbb, BOOL icopy_phase,
 #ifdef KEY // bug 5131
   if (x->Mp_shared())
     return NULL;
+  if (x->acc_offload())
+    return NULL;
 #endif
 
 #ifdef KEY // bug 1596: do not propagate an ARRAY node to the base field of

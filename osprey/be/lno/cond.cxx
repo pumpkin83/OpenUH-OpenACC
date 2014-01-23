@@ -763,6 +763,7 @@ static BOOL Eliminate_Dead_SCF_rec(WN *wn,
 	return result; 
       if (kid && WN_opcode(kid)==OPC_DO_LOOP 
 	  && Iters(kid)==1
+	  && !Do_Loop_Is_ACC(kid)
 	  && !Do_Loop_Is_Mp(kid)
           && !Is_Nested_Doacross(kid)) {
         WN *first, *last;

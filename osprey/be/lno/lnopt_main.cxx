@@ -845,6 +845,7 @@ Fully_Unroll_Short_Loops(WN* wn, BOOL is_seq_iter = FALSE)
 #endif
            !Do_Loop_Has_Gotos(wn) &&
            !Do_Loop_Is_Mp(wn)     &&
+           !Do_Loop_Is_ACC(wn)     &&
            !Is_Nested_Doacross(wn) &&
 #ifdef KEY
            Num_Inner_Loops(wn) <= MAX_INNER_LOOPS) {

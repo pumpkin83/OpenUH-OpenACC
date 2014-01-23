@@ -441,7 +441,8 @@ typedef struct ACC_ReductionMap
 {
 	ST* hostName;//host reduction ST
 	ST* deviceName; //device memory ST, allocated in host side
-	ST* st_Inkernel; //st in the kernel. For each reduction, there is a respective st* in the kernel, usually as kernel parameter.
+	ST* st_Inkernel; //st in the kernel. For each reduction, there is a respective st* in the kernel, usually as kernel parameter. this is a buffer
+	ST* st_inout_used;	//the variable init/output buffer before/after reduction
 	ST* reduction_kenels; //an independent kernel carry the final reduction
 	ST* st_private_var; //private var in kernel to store reduction result
 	WN* wn_private_var;
@@ -458,7 +459,7 @@ typedef struct ACC_ReductionMap
 	ST* st_backupValue;		
 	WN* wn_backupValue;	
 	WN* wn_backupStmt;
-	ACC_ReductionMap()
+	/*ACC_ReductionMap()
 	{
 		hostName = NULL;
 		deviceName = NULL;
@@ -475,7 +476,7 @@ typedef struct ACC_ReductionMap
 		st_backupValue = NULL;
 		wn_backupValue = NULL;
 		wn_backupStmt = NULL;
-	}
+	}*/
 	
 }ACC_ReductionMap;
 
@@ -626,21 +627,48 @@ vector<ACC_DREGION__ENTRY> acc_dregion_present;
 vector<ACC_DREGION__ENTRY> acc_dregion_host;
 vector<ACC_DREGION__ENTRY> acc_dregion_device;
 vector<ACC_DREGION__ENTRY> acc_dregion_private;
-vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
+vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;//first private
+vector<ACC_DREGION__ENTRY> acc_dregion_lprivate;//last private
+vector<ACC_DREGION__ENTRY> acc_dregion_inout_scalar;
 
 
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcreate;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcopy;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcopyin;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcopyout;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_present;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_host;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_device;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_private;
-map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_fprivate; //first private
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcreate;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcopy;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcopyin;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_pcopyout;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_present;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_host;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_device;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_private;
+//map<ST*, ACC_DATA_ST_MAP*> acc_mapOffload_fprivate; //first private
+
+typedef enum ACC_SCALAR_TYPE
+{
+	ACC_SCALAR_VAR_IN,
+	ACC_SCALAR_VAR_OUT,
+	ACC_SCALAR_VAR_INOUT,
+	ACC_SCALAR_VAR_PRIVATE
+}ACC_SCALAR_TYPE;
+
+typedef struct ACC_SCALAR_VAR_INFO
+{
+	ST* st_var;
+	ACC_SCALAR_TYPE acc_scalar_type;
+	//no value  when acc_scalar_type is ACC_SCALAR_VAR_IN and ACC_SCALAR_VAR_PRIVATE
+	ST* st_device_in_host;
+	//no value  when acc_scalar_type is ACC_SCALAR_VAR_PRIVATE
+	//pointer type when acc_scalar_type is ACC_SCALAR_VAR_OUT, ACC_SCALAR_VAR_INOUT,ACC_SCALAR_VAR_REDUCTION
+	//scalar value when acc_scalar_type is ACC_SCALAR_VAR_IN
+	ST* st_device_in_kparameters; 
+	//scalar type
+	ST* st_device_in_klocal;
+	BOOL is_reduction; //reduction variable can also be one of ACC_SCALAR_TYPE.
+	UINT32 isize; //size in bytes, transfer between host and device
+}ACC_SCALAR_VAR_INFO;
 
 
-typedef ST * ACC_SHARED_TABLE;
+map<ST*, ACC_SCALAR_VAR_INFO*> acc_offload_scalar_management_tab;
+//typedef ST * ACC_SHARED_TABLE;
 
 // Generic type for parallel runtime routines
 static TY_IDX accruntime_ty = TY_IDX_ZERO;
@@ -690,12 +718,14 @@ static WN *acc_present_or_create_nodes;
 static WN *acc_deviceptr_nodes;
 static WN *acc_private_nodes;
 static WN *acc_firstprivate_nodes;
+static WN *acc_lastprivate_nodes;//basically, it is used for copyout
+static WN *acc_inout_nodes;
 
-static vector<ST*> acc_scalar_inout_nodes;
+/*tstatic vector<ST*> acc_scalar_inout_nodes;
 static vector<ST*> acc_scalar_out_nodes;
 //for scalar inout
 //take a look at the source generated, you will understand
-typedef struct ACC_SCALAR_INOUT_INFO
+ypedef struct ACC_SCALAR_INOUT_INFO
 {
 	ST* st_host;
 	ST* st_device_ptr_on_host;
@@ -705,7 +735,7 @@ typedef struct ACC_SCALAR_INOUT_INFO
 }ACC_SCALAR_INOUT_INFO;
 
 map<ST*, ACC_SCALAR_INOUT_INFO*> acc_map_scalar_inout;
-map<ST*, ACC_SCALAR_INOUT_INFO*> acc_map_scalar_out;
+map<ST*, ACC_SCALAR_INOUT_INFO*> acc_map_scalar_out;*/
 
 static WN* acc_AsyncExpr = NULL;
 static WN* acc_async_nodes;   /* async int expression */
@@ -721,10 +751,10 @@ static map<ST*, ACC_VAR_TABLE> acc_local_new_var_map;     //used to replace var 
 //static ACC_VAR_TABLE *acc_copyout_var_table;	    /* Table of variable substitutions */
 
 
-static ACC_SHARED_TABLE *acc_copyout_table;  /* Table of shared ST's */
-static ACC_SHARED_TABLE *acc_copyin_table;  /* Table of shared ST's */
-static ACC_SHARED_TABLE *acc_copy_table;  /* Table of shared ST's */
-static ACC_SHARED_TABLE *acc_parm_table;  /* Table of shared ST's */
+//static ACC_SHARED_TABLE *acc_copyout_table;  /* Table of shared ST's */
+//static ACC_SHARED_TABLE *acc_copyin_table;  /* Table of shared ST's */
+//static ACC_SHARED_TABLE *acc_copy_table;  /* Table of shared ST's */
+//static ACC_SHARED_TABLE *acc_parm_table;  /* Table of shared ST's */
 
 typedef struct acc_reduction_kernels_pair
 {
@@ -884,6 +914,8 @@ typedef struct
 	vector<ACC_DREGION__ENTRY> acc_dregion_present;
 	vector<ACC_DREGION__ENTRY> acc_dregion_private;
 	vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_lprivate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_inout_scalar;
 	//////////////////////////////////////////////////////
 	WN * acc_if_node;
 	WN * acc_copy_nodes;		/* Points to (optional) copy nodes */
@@ -921,6 +953,8 @@ typedef struct
 	vector<ACC_DREGION__ENTRY> acc_dregion_present;
 	vector<ACC_DREGION__ENTRY> acc_dregion_private;
 	vector<ACC_DREGION__ENTRY> acc_dregion_fprivate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_lprivate;
+	vector<ACC_DREGION__ENTRY> acc_dregion_inout_scalar;
 	////////////////////////////////////////////////////////////////
 	WN * acc_if_node;
 	WN * acc_copy_nodes;		/* Points to (optional) copy nodes */
@@ -956,14 +990,15 @@ typedef struct
 
 typedef struct KernelParameter
 {
-	ST* st_host;
-	ST*	st_device;
+	ST* st_host;  //host memory space
+	ST*	st_device;//still on host side Symbol table which points to device memory space
 	//ACC_DU_Liveness acc_inout;
 	
 }KernelParameter;
-
+//used to create kernel parameters when outline kernel function.
 vector<KernelParameter> acc_kernelLaunchParamList;
-vector<KernelParameter> acc_additionalKernelLaunchParamList; //main for reduction
+//main for reduction
+vector<KernelParameter> acc_additionalKernelLaunchParamList; 
 
 static ST* ACC_GenSingleCreateAndMallocDeviceMem(WN* l, 
 						vector<ACC_DATA_ST_MAP*>* pDMap, WN* ReplacementBlock);
@@ -2279,13 +2314,66 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 			kernel_param.push_back(new_st);
 		}
 		//Scalar variables in
-		else if (kind == KIND_SCALAR && acc_kernelLaunchParamList[i].st_device == NULL)
+		else if (kind == KIND_SCALAR)// && acc_kernelLaunchParamList[i].st_device == NULL)
 		{
-			map<ST*, ACC_ReductionMap>::iterator itor = acc_reduction_tab_map.find(old_st);	
-			//find the symbol in the reduction, then ignore it in the parameters.
-			if(itor != acc_reduction_tab_map.end())
-				continue;
-			new_st = New_ST( CURRENT_SYMTAB );
+			ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[old_st];
+			TY_IDX ty_param;
+			ST* st_param;
+			//new_ty, new_st are used to local variable
+			//ty_param, st_param are used for parameter.
+			//They may be different in ACC_SCALAR_VAR_INOUT and ACC_SCALAR_VAR_OUT cases
+			
+			if(!pVarInfo)
+				Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
+			else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE)
+				Fail_FmtAssertion("A private var should not appear in kernel parameters.");
+			else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_IN)
+			{
+				ty_param = ty;
+				new_st = New_ST( CURRENT_SYMTAB );
+				ST_Init(new_st,
+						Save_Str( ST_name(old_st)),
+						CLASS_VAR,
+						SCLASS_FORMAL,
+						EXPORT_LOCAL,
+						ty);
+				Set_ST_is_value_parm( new_st );
+				kernel_param.push_back(new_st);
+				//they are the same in this case
+				pVarInfo->st_device_in_kparameters = new_st;
+				pVarInfo->st_device_in_klocal = new_st;
+			}
+			else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_INOUT
+				|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_OUT)
+			{
+				//create parameter
+				ty_param = ST_type(pVarInfo->st_device_in_host);
+				st_param = New_ST( CURRENT_SYMTAB );
+				ST_Init(st_param,
+						Save_Str2("_dp_",  ST_name(old_st)),
+						CLASS_VAR,
+						SCLASS_FORMAL,
+						EXPORT_LOCAL,
+						ty_param);
+				Set_ST_is_value_parm( st_param );
+				kernel_param.push_back(st_param);
+				//create local				
+				new_st = New_ST( CURRENT_SYMTAB );
+				ST_Init(new_st,
+						Save_Str( ST_name(old_st)),
+						CLASS_VAR,
+						SCLASS_FORMAL,
+						EXPORT_LOCAL,
+						ty);
+				//Set_ST_is_value_parm( new_st );
+				//kernel_param.push_back(new_st);
+				pVarInfo->st_device_in_kparameters = st_param;
+				pVarInfo->st_device_in_klocal = new_st;
+			}
+			else
+				Fail_FmtAssertion("Unclassified variables appears in kernel parameters.");
+				
+			/*new_st = New_ST( CURRENT_SYMTAB );
 			ST_Init(new_st,
 					Save_Str( localname ),
 					CLASS_VAR,
@@ -2293,52 +2381,11 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 					EXPORT_LOCAL,
 					ty);
 			Set_ST_is_value_parm( new_st );
-			kernel_param.push_back(new_st);
+			kernel_param.push_back(new_st);*/
 		}
-		//Scalar variables inout/out
-		else if (kind == KIND_SCALAR && acc_kernelLaunchParamList[i].st_device != NULL)
-		{
-			map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor_inout;
-			map<ST*, ACC_ReductionMap>::iterator itor_reduction = acc_reduction_tab_map.find(old_st);	
-			//find the symbol in the reduction, then ignore it in the parameters.
-			//if(itor_reduction != acc_reduction_tab_map.end())
-			//	continue;
-			//this new_st is used as private symbol table.
-			new_st = New_ST( CURRENT_SYMTAB );
-			ST_Init(new_st,
-					Save_Str( ST_name(old_st)),
-					CLASS_VAR,
-					SCLASS_FORMAL,
-					EXPORT_LOCAL,
-					ty);
-			//this st_param is used as GPU kernel parameters
-			ST* st_param = New_ST( CURRENT_SYMTAB );			
-			ST_Init(st_param,
-					Save_Str2("dp_scalar_", ST_name(old_st)),
-					CLASS_VAR,
-					SCLASS_FORMAL,
-					EXPORT_LOCAL,
-					ST_type(acc_kernelLaunchParamList[i].st_device));
-			Set_ST_is_value_parm( st_param );
-			kernel_param.push_back(st_param);
-			//Update IN/OUT list info
-			itor_inout = acc_map_scalar_inout.find(old_st);	
-			//if it is not in the inout list, try out list
-			if(itor_inout == acc_map_scalar_inout.end())
-				itor_inout = acc_map_scalar_out.find(old_st);	
-			if(itor_inout == acc_map_scalar_out.end())
-				Fail_FmtAssertion("Scalar ST cannot be found InOut list during kernel parameter creation.");
-			itor_inout->second->st_device_ptr_on_kernel = st_param;
-			itor_inout->second->st_device_scalar = new_st;
-		}
+		
 		ACC_VAR_TABLE var;
-		//if(old_offset)
-		//{
-		//	var.has_offset = TRUE;
-			//var.orig_offset = old_offset;
-		//}
-		//else
-			var.has_offset = FALSE;
+		var.has_offset = FALSE;
 		var.orig_st = old_st;
 		var.new_st = new_st;
 		acc_local_new_var_map[old_st] = var;
@@ -2347,6 +2394,8 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 	//reduction @Parallel region
 	if(isParallel && acc_parallel_loop_info.loopnum>0)
 	{
+	//for ST name 
+#define EXTRA_TEMP_BUFFER_SIZE	(32)
 		UINT32 loopinfoIdx = 0;
 		ACC_LOOP_INFO acc_loopinfo_local;
 		while(loopinfoIdx<acc_parallel_loop_info.loopnum)
@@ -2356,46 +2405,61 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 			while(i < acc_loopinfo_local.acc_forloop[0].reductionmap.size())
 			{
 				ACC_ReductionMap reductionmap = acc_loopinfo_local.acc_forloop[0].reductionmap[i];
+				ST* st_reduction_private_var;
+				WN_OFFSET old_offset = 0;	
 				////////////////////////////////////////////////////////////////////////////
 				//it is in the caller function ST.
 				//ST* st_device = reductionmap.deviceName;
 				ST* st_host = reductionmap.hostName;
+				ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_host];
+				////////////////////////////////////////////////////////////////////////////
+				if(!pVarInfo)
+					Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE 
+					|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_IN 
+					|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_OUT)
+					Fail_FmtAssertion("unecessary reduction in the top acc loop.");				
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_INOUT)
+				{
+					pVarInfo->is_reduction = TRUE;
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+					//create parameter	
+				    TY_IDX ty_elem = ST_type(st_host);
+				    //TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+				    char* localname = (char *) alloca(strlen(ST_name(st_host))+EXTRA_TEMP_BUFFER_SIZE);	
+					//reduction used buffer
+					sprintf ( localname, "__acc_rbuff_%s", ST_name(st_host) );
+					//if (kind == KIND_POINTER)
+					//{
+					//TY_IDX pty = TY_pointed(ty);
+					TY_IDX ty_p = Make_Pointer_Type(ty_elem);
+					//Set_TY_align(ty_p, 4);
+					ST *karg = NULL;
+					karg = New_ST( CURRENT_SYMTAB );
+					ST_Init(karg,
+							Save_Str( localname ),
+							CLASS_VAR,
+							SCLASS_FORMAL,
+							EXPORT_LOCAL,
+							ty_p);
+					Set_ST_is_value_parm( karg );
+					kernel_param.push_back(karg);
+					KernelParameter kernelParameter;
+					kernelParameter.st_host = st_host;
+					kernelParameter.st_device = reductionmap.deviceName;
+					acc_additionalKernelLaunchParamList.push_back(kernelParameter);
+					reductionmap.st_Inkernel = karg;
+				}
+				else
+					Fail_FmtAssertion("Unclassified variables appears in kernel parameters.");
 
-				ST* st_reduction_private_var = New_ST( CURRENT_SYMTAB );
-				//sprintf ( reduction_localname, "device_%s", ST_name(reductionMap.hostName));
-				ST_Init(st_reduction_private_var, Save_Str2("__private_", ST_name(st_host)), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
 				reductionmap.st_private_var = st_reduction_private_var;
 				reductionmap.wn_private_var = WN_Ldid(TY_mtype(ST_type(st_reduction_private_var)), 
 						0, st_reduction_private_var, ST_type(st_reduction_private_var));
+				reductionmap.st_inout_used = pVarInfo->st_device_in_kparameters;
 
 				
-				WN_OFFSET old_offset = 0;		
-			    TY_IDX ty_elem = ST_type(st_host);
-			    //TY_KIND kind = TY_kind(ty);//ST_name(old_st)
-			    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);	
 				
-				sprintf ( localname, "__reduction_%s", ST_name(st_host) );
-				//if (kind == KIND_POINTER)
-				//{
-				//TY_IDX pty = TY_pointed(ty);
-				TY_IDX ty_p = Make_Pointer_Type(ty_elem);
-				//Set_TY_align(ty_p, 4);
-				ST *karg = NULL;
-				karg = New_ST( CURRENT_SYMTAB );
-				ST_Init(karg,
-						Save_Str( localname ),
-						CLASS_VAR,
-						SCLASS_FORMAL,
-						EXPORT_LOCAL,
-						ty_p);
-				Set_ST_is_value_parm( karg );
-				kernel_param.push_back(karg);
-				KernelParameter kernelParameter;
-				kernelParameter.st_host = st_host;
-				kernelParameter.st_device = reductionmap.deviceName;
-				acc_additionalKernelLaunchParamList.push_back(kernelParameter);
-				reductionmap.st_Inkernel = karg;
 				reductionmap.looptype = acc_loopinfo.acc_forloop[0].looptype;
 				//v->reduction_opr = reductionmap.ReductionOpr;
 				//}
@@ -2419,79 +2483,101 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				ACC_ReductionMap reductionmap = acc_loopinfo_local.acc_forloop[1].reductionmap[i];
 				////////////////////////////////////////////////////////////////////////////
 				//it is in the caller function ST.
-				//ST* st_device = reductionmap.deviceName; 		
+				//ST* st_device = reductionmap.deviceName; 
 				ST* st_host = reductionmap.hostName;
 				TYPE_ID typeID = TY_mtype(ST_type(st_host));
-
-				ST* st_reduction_private_var;// = New_ST( CURRENT_SYMTAB );
-				//sprintf ( reduction_localname, "device_%s", ST_name(reductionMap.hostName));
-				
-				map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor_inout = acc_map_scalar_inout.find(st_host);
-				if(itor_inout == acc_map_scalar_inout.end())
-					itor_inout = acc_map_scalar_out.find(st_host);	
-				if(itor_inout == acc_map_scalar_out.end())
+				ST* st_reduction_private_var;
+				ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_host];
+				////////////////////////////////////////////////////////////////////////////
+				if(!pVarInfo)
+					Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
+				//else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE)
+				//	Fail_FmtAssertion("A private var should not appear in kernel parameters.");
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_IN)					
 				{
+					pVarInfo->is_reduction = TRUE;
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+				}
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE)
+				{
+					pVarInfo->is_reduction = TRUE;
 					st_reduction_private_var = New_ST( CURRENT_SYMTAB );
 					ST_Init(st_reduction_private_var, Save_Str2("__private_", 
 							ST_name(st_host)), CLASS_VAR, 
 							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+					pVarInfo->st_device_in_klocal = st_reduction_private_var;
 				}
-				//the var is in in/out var list
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_INOUT
+					|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_OUT)
+				{
+					pVarInfo->is_reduction = TRUE;
+					//this was create previously in kernel parameter function
+					//scalar inout/out create section
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+					//create parameter	
+				    TY_IDX ty_elem = ST_type(st_host);
+					
+					if(acc_reduction_mem == ACC_RD_GLOBAL_MEM)
+					{
+						////////////////////////////////////////////
+						ST* reduction_param = acc_global_memory_for_reduction_param[typeID];
+						if(!reduction_param)
+						{
+							WN_OFFSET old_offset = 0;		
+						    TY_IDX ty_elem = ST_type(st_host);
+						    //TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+						    char* localname = (char *) alloca(strlen(ST_name(st_host))+EXTRA_TEMP_BUFFER_SIZE);
+							
+							sprintf ( localname, "acc_rbuff_%s", ST_name(st_host) );
+							//if (kind == KIND_POINTER)
+							//{
+							//TY_IDX pty = TY_pointed(ty);
+							TY_IDX ty_p = Make_Pointer_Type(ty_elem);
+							//Set_TY_align(ty_p, 4);
+							ST *karg = NULL;
+							karg = New_ST( CURRENT_SYMTAB );
+							ST_Init(karg,
+									Save_Str( localname ),
+									CLASS_VAR,
+									SCLASS_FORMAL,
+									EXPORT_LOCAL,
+									ty_p);
+							Set_ST_is_value_parm( karg );
+							kernel_param.push_back(karg);
+							KernelParameter kernelParameter;
+							kernelParameter.st_host = st_host;
+							kernelParameter.st_device = reductionmap.deviceName;
+							acc_additionalKernelLaunchParamList.push_back(kernelParameter);
+							acc_global_memory_for_reduction_param[typeID] = karg;
+							reductionmap.st_Inkernel = karg;
+							//}
+						}
+						else
+						{
+							reductionmap.st_Inkernel = reduction_param;
+						}
+					}
+					else if(acc_reduction_mem == ACC_RD_SHARED_MEM)
+					{
+						////////////////////////////////////////////
+						//ST* reduction_param = acc_shared_memory_for_reduction_device[typeID];
+						reductionmap.st_Inkernel = acc_st_shared_memory;					
+					}
+					//create thread-private reduction var for each reduction
+					st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+					ST_Init(st_reduction_private_var, Save_Str2("__private_", 
+							ST_name(st_host)), CLASS_VAR, 
+							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+					//init/output type size buffer
+					reductionmap.st_inout_used = pVarInfo->st_device_in_kparameters;
+				}
 				else
-					st_reduction_private_var = itor_inout->second->st_device_scalar;
-
-
-				//////////////////////////////////////////////////////////////////////////////
+					Fail_FmtAssertion("Unclassified variables appears in kernel parameters.");
+				///////////////////////////////////////////////////////////////////////////////////
 				reductionmap.st_private_var = st_reduction_private_var;
 				reductionmap.wn_private_var = WN_Ldid(TY_mtype(ST_type(st_reduction_private_var)), 
 						0, st_reduction_private_var, ST_type(st_reduction_private_var));
-				if(acc_reduction_mem == ACC_RD_GLOBAL_MEM)
-				{
-					////////////////////////////////////////////
-					ST* reduction_param = acc_global_memory_for_reduction_param[typeID];
-					if(!reduction_param)
-					{
-						WN_OFFSET old_offset = 0;		
-					    TY_IDX ty_elem = ST_type(st_host);
-					    //TY_KIND kind = TY_kind(ty);//ST_name(old_st)
-					    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);
-						
-						sprintf ( localname, "__reduction_%s", ST_name(st_host) );
-						//if (kind == KIND_POINTER)
-						//{
-						//TY_IDX pty = TY_pointed(ty);
-						TY_IDX ty_p = Make_Pointer_Type(ty_elem);
-						//Set_TY_align(ty_p, 4);
-						ST *karg = NULL;
-						karg = New_ST( CURRENT_SYMTAB );
-						ST_Init(karg,
-								Save_Str( localname ),
-								CLASS_VAR,
-								SCLASS_FORMAL,
-								EXPORT_LOCAL,
-								ty_p);
-						Set_ST_is_value_parm( karg );
-						kernel_param.push_back(karg);
-						KernelParameter kernelParameter;
-						kernelParameter.st_host = st_host;
-						kernelParameter.st_device = reductionmap.deviceName;
-						acc_additionalKernelLaunchParamList.push_back(kernelParameter);
-						acc_global_memory_for_reduction_param[typeID] = karg;
-						reductionmap.st_Inkernel = karg;
-						//}
-					}
-					else
-					{
-						reductionmap.st_Inkernel = reduction_param;
-					}
-				}
-				else if(acc_reduction_mem == ACC_RD_SHARED_MEM)
-				{
-					////////////////////////////////////////////
-					//ST* reduction_param = acc_shared_memory_for_reduction_device[typeID];
-					reductionmap.st_Inkernel = acc_st_shared_memory;					
-				}
-				
+				///////////////////////////////////////////////////////////////////////////////////
 				reductionmap.looptype = acc_loopinfo.acc_forloop[1].looptype;
 				ACC_VAR_TABLE var;
 				var.has_offset = FALSE;
@@ -2507,68 +2593,102 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				ACC_ReductionMap reductionmap = acc_loopinfo_local.acc_forloop[2].reductionmap[i];
 				////////////////////////////////////////////////////////////////////////////
 				//it is in the caller function ST.
-				//ST* st_device = reductionmap.deviceName; 		
+				//ST* st_device = reductionmap.deviceName; 	
 				ST* st_host = reductionmap.hostName;
 				TYPE_ID typeID = TY_mtype(ST_type(st_host));
 				ST* st_reduction_private_var;
-				
-				map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor_inout = acc_map_scalar_inout.find(st_host);
-				if(itor_inout == acc_map_scalar_inout.end())
-					itor_inout = acc_map_scalar_out.find(st_host);	
-				if(itor_inout == acc_map_scalar_out.end())
+				ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_host];
+				////////////////////////////////////////////////////////////////////////////
+				if(!pVarInfo)
+					Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
+				//else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE)
+				//	Fail_FmtAssertion("A private var should not appear in kernel parameters.");
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_IN)					
 				{
+					pVarInfo->is_reduction = TRUE;
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+				}
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE)
+				{
+					pVarInfo->is_reduction = TRUE;
 					st_reduction_private_var = New_ST( CURRENT_SYMTAB );
-					//sprintf ( reduction_localname, "device_%s", ST_name(reductionMap.hostName));
-					ST_Init(st_reduction_private_var, Save_Str2("__private_", ST_name(st_host)), CLASS_VAR, 
+					ST_Init(st_reduction_private_var, Save_Str2("__private_", 
+							ST_name(st_host)), CLASS_VAR, 
 							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+					pVarInfo->st_device_in_klocal = st_reduction_private_var;
+				}
+				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_INOUT
+					|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_OUT)
+				{
+					pVarInfo->is_reduction = TRUE;
+					//this was create previously in kernel parameter function
+					//scalar inout/out create section
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+					//create parameter	
+				    TY_IDX ty_elem = ST_type(st_host);
+					
+					if(acc_reduction_mem == ACC_RD_GLOBAL_MEM)
+					{
+						////////////////////////////////////////////
+						ST* reduction_param = acc_global_memory_for_reduction_param[typeID];
+						if(!reduction_param)
+						{
+							WN_OFFSET old_offset = 0;		
+						    TY_IDX ty_elem = ST_type(st_host);
+						    //TY_KIND kind = TY_kind(ty);//ST_name(old_st)
+						    char* localname = (char *) alloca(strlen(ST_name(st_host))+EXTRA_TEMP_BUFFER_SIZE);
+							
+							sprintf ( localname, "acc_rbuff_%s", ST_name(st_host) );
+							//if (kind == KIND_POINTER)
+							//{
+							//TY_IDX pty = TY_pointed(ty);
+							TY_IDX ty_p = Make_Pointer_Type(ty_elem);
+							//Set_TY_align(ty_p, 4);
+							ST *karg = NULL;
+							karg = New_ST( CURRENT_SYMTAB );
+							ST_Init(karg,
+									Save_Str( localname ),
+									CLASS_VAR,
+									SCLASS_FORMAL,
+									EXPORT_LOCAL,
+									ty_p);
+							Set_ST_is_value_parm( karg );
+							kernel_param.push_back(karg);
+							KernelParameter kernelParameter;
+							kernelParameter.st_host = st_host;
+							kernelParameter.st_device = reductionmap.deviceName;
+							acc_additionalKernelLaunchParamList.push_back(kernelParameter);
+							acc_global_memory_for_reduction_param[typeID] = karg;
+							reductionmap.st_Inkernel = karg;
+							//}
+						}
+						else
+						{
+							reductionmap.st_Inkernel = reduction_param;
+						}
+					}
+					else if(acc_reduction_mem == ACC_RD_SHARED_MEM)
+					{
+						////////////////////////////////////////////
+						//ST* reduction_param = acc_shared_memory_for_reduction_device[typeID];
+						reductionmap.st_Inkernel = acc_st_shared_memory;					
+					}
+					//create thread-private reduction var for each reduction
+					st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+					ST_Init(st_reduction_private_var, Save_Str2("__private_", 
+							ST_name(st_host)), CLASS_VAR, 
+							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+					//init/output type size buffer
+					reductionmap.st_inout_used = pVarInfo->st_device_in_kparameters;
 				}
 				else
-					st_reduction_private_var = itor_inout->second->st_device_scalar;
-
+					Fail_FmtAssertion("Unclassified variables appears in kernel parameters.");
 				
+				///////////////////////////////////////////////////////////////////////////////////
 				reductionmap.st_private_var = st_reduction_private_var;
 				reductionmap.wn_private_var = WN_Ldid(TY_mtype(ST_type(st_reduction_private_var)), 
 						0, st_reduction_private_var, ST_type(st_reduction_private_var));
-				////////////////////////////////////////////
-				if(acc_reduction_mem == ACC_RD_GLOBAL_MEM)
-				{
-					ST* reduction_param = acc_global_memory_for_reduction_param[typeID];
-					if(!reduction_param)
-					{
-						WN_OFFSET old_offset = 0;		
-					    TY_IDX ty_elem = ST_type(st_host);
-					    char* localname = (char *) alloca(strlen(ST_name(st_host))+10);	
-						
-						sprintf ( localname, "__reduction_%s", ST_name(st_host) );
-						TY_IDX ty_p = Make_Pointer_Type(ty_elem);
-						//Set_TY_align(ty_p, 4);
-						ST *karg = NULL;
-						karg = New_ST( CURRENT_SYMTAB );
-						ST_Init(karg,
-								Save_Str( localname ),
-								CLASS_VAR,
-								SCLASS_FORMAL,
-								EXPORT_LOCAL,
-								ty_p);
-						Set_ST_is_value_parm( karg );
-						kernel_param.push_back(karg);
-						KernelParameter kernelParameter;
-						kernelParameter.st_host = st_host;
-						kernelParameter.st_device = reductionmap.deviceName;
-						acc_additionalKernelLaunchParamList.push_back(kernelParameter);
-						acc_global_memory_for_reduction_param[typeID] = karg;
-						reductionmap.st_Inkernel = karg;
-						//}
-					}
-					else
-					{
-						reductionmap.st_Inkernel = reduction_param;
-					}
-				}
-				else if(acc_reduction_mem == ACC_RD_SHARED_MEM)
-				{
-					reductionmap.st_Inkernel = acc_st_shared_memory;
-				}
+				////////////////////////////////////////////////////////////////////////////////////
 				reductionmap.looptype = acc_loopinfo.acc_forloop[2].looptype;
 				ACC_VAR_TABLE var;
 				var.has_offset = FALSE;
@@ -4110,34 +4230,6 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	WN* wn_InnerIndexStep = NULL;
 	WN* wn_MidIndexStep = NULL;
 	WN* wn_OuterIndexStep = NULL;
-	//Set up predefined variable in CUDA
-	threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
-					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
-	threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
-					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
-	threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
-					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
-	
-	blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
-					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
-	blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
-					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
-	blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
-					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
-	
-	blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
-					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
-	blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
-					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
-	blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
-					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
-	
-	griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
-					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
-	griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
-					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
-	griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
-					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
 	///////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////
    IndexGenerationBlock = WN_CreateBlock ();
@@ -4954,7 +5046,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	int kernel_index_count = 0;
 	
 	//create private list
-	for(i=0; i<acc_loopinfo.loopnum; i++)
+	/*for(i=0; i<acc_loopinfo.loopnum; i++)
 	{
 		WN* wn_node = acc_loopinfo.acc_forloop[i].acc_private;
 	    char szlocalname[256];	  
@@ -4976,9 +5068,9 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			var.new_st = st_new_private;
 		    acc_local_new_var_map[st_private] = var;
 		}		
-	}
+	}*/
 	
-	if(acc_private_nodes)
+	/*if(acc_private_nodes)
 	{
 		WN* wn_node = acc_private_nodes;
 	    char szlocalname[256];	  
@@ -5000,6 +5092,35 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			var.new_st = st_new_private;
 		    acc_local_new_var_map[st_private] = var;
 		}		
+	}*/
+	map<ST*, ACC_SCALAR_VAR_INFO*>::iterator itor_offload_info = acc_offload_scalar_management_tab.begin();
+	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
+	{
+		ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+	    char szlocalname[256];	  
+		//several cases:
+		//1. ACC_SCALAR_VAR_IN, ACC_SCALAR_VAR_OUT and  ACC_SCALAR_VAR_INOUT
+		//the new private var is created during kernel parameter generation
+		//2. ACC_SCALAR_VAR_PRIVATE 2.1 the new private var is created during kernel parameter generation if it is reduction var
+		//							 2.2  else the new private var is going to created.
+		if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_PRIVATE && pVarInfo->is_reduction== FALSE)
+		{
+			ST* st_private = pVarInfo->st_var;
+			TY_IDX index_ty = ST_type(st_private);
+		    ST* st_new_private = New_ST( CURRENT_SYMTAB );
+	    	sprintf ( szlocalname, "%s", ST_name(st_private));
+			ST_Init(st_new_private,
+		      Save_Str( szlocalname),
+		      CLASS_VAR,
+		      SCLASS_AUTO,
+		      EXPORT_LOCAL,
+		      index_ty);//Put this variables in local table
+			ACC_VAR_TABLE var;
+			var.has_offset = FALSE;
+			var.orig_st = st_private;
+			var.new_st = st_new_private;
+		    acc_local_new_var_map[st_private] = var;
+		}
 	}
 	//Set up predefined variable in CUDA
 	WN* threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
@@ -5036,12 +5157,20 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	///////////////////////////////////////////////////////////////////
 	/*********************************************************/
 	//Init IN/OUT scalar variables
-	{	
-		map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
-		for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
+	//map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
+	itor_offload_info = acc_offload_scalar_management_tab.begin();
+	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
+	{
+		ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+		//several cases:
+		//1. ACC_SCALAR_VAR_IN, initialized in parameter
+		//2. ACC_SCALAR_VAR_OUT : no init
+		//3. ACC_SCALAR_VAR_INOUT: need init
+		//2. ACC_SCALAR_VAR_PRIVATE no init
+		if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT)
 		{
-			ST* st_scalar = itor->second->st_device_scalar;
-			ST* st_scalar_ptr = itor->second->st_device_ptr_on_kernel;
+			ST* st_scalar = pVarInfo->st_device_in_klocal;
+			ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
 			TY_IDX elem_ty = ST_type(st_scalar);			
 			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
 			WN* Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, wn_scalar_ptr);
@@ -5049,6 +5178,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 			WN_INSERT_BlockLast(IndexGenerationBlock, Init0);
 		}
 	}
+	/////////////////////////////////////////////////////////////
 	/*********************************************************/
 
 	if(acc_loopinfo.loopnum == 1)
@@ -6178,31 +6308,47 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		Is_True(FALSE, ("more than 3 Level Loop Combination is not supported.@acc_lower:ACC_Transform_MultiForLoop."));
 	}
 	//Init IN/OUT scalar variables
-	{	
-		map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
-		for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
+	{
+		
+		WN* test1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+					WN_COPY_Tree(threadidx), 
+					WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+		WN* test2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_y)), 
+					WN_COPY_Tree(threadidy), 
+					WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_y)), 0));
+		WN* test3 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_blockIdx_x)), 
+					WN_COPY_Tree(blockidx), 
+					WN_Intconst(TY_mtype(ST_type(glbl_blockIdx_x)), 0));
+		WN* wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, test1, test2);
+		wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, wn_If_stmt_test, test3);
+		WN* wn_thenblock = WN_CreateBlock();
+		WN* wn_elseblock = WN_CreateBlock();
+		
+		itor_offload_info = acc_offload_scalar_management_tab.begin();
+		for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
 		{
-			ST* st_scalar = itor->second->st_device_scalar;
-			ST* st_scalar_ptr = itor->second->st_device_ptr_on_kernel;
-			TY_IDX elem_ty = ST_type(st_scalar);
-			WN* Init0 = WN_Ldid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar));
-			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
-			Init0 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), 
-								wn_scalar_ptr, Init0);
-			WN_INSERT_BlockLast(IndexGenerationBlock, Init0);
+			ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+			//several cases:
+			//1. ACC_SCALAR_VAR_IN, initialized in parameter
+			//2. ACC_SCALAR_VAR_OUT : no init
+			//3. ACC_SCALAR_VAR_INOUT: need init
+			//2. ACC_SCALAR_VAR_PRIVATE no init
+			if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT 
+				|| pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_OUT)
+			{				
+				ST* st_scalar = pVarInfo->st_device_in_klocal;
+				ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
+				TY_IDX elem_ty = ST_type(st_scalar);
+				WN* Init0 = WN_Ldid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar));
+				WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
+				Init0 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), 
+									wn_scalar_ptr, Init0);
+				
+				WN_INSERT_BlockLast(wn_thenblock, Init0);
+			}
 		}
-
-		for(itor = acc_map_scalar_out.begin(); itor != acc_map_scalar_out.end(); itor++)
-		{
-			ST* st_scalar = itor->second->st_device_scalar;
-			ST* st_scalar_ptr = itor->second->st_device_ptr_on_kernel;
-			TY_IDX elem_ty = ST_type(st_scalar);
-			WN* Init0 = WN_Ldid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar));
-			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
-			Init0 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), 
-								wn_scalar_ptr, Init0);
-			WN_INSERT_BlockLast(IndexGenerationBlock, Init0);
-		}		
+		WN* wn_scalar_out = WN_CreateIf(wn_If_stmt_test, wn_thenblock, WN_CreateBlock());
+		WN_INSERT_BlockLast(IndexGenerationBlock, wn_scalar_out);
 	}
    	WN_INSERT_BlockLast ( acc_parallel_func, IndexGenerationBlock );
 	/* Transfer any mappings for nodes moved from parent to parallel function */
@@ -7872,24 +8018,9 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	//st_shared_array_4parallelRegion = NULL;
 	WN* wn_parallelBlock = WN_CreateBlock();
 	/*********************************************************/
-	//Init IN/OUT scalar variables
-	{	
-		map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
-		for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
-		{
-			ST* st_scalar = itor->second->st_device_scalar;
-			ST* st_scalar_ptr = itor->second->st_device_ptr_on_kernel;
-			TY_IDX elem_ty = ST_type(st_scalar);			
-			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
-			WN* Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, wn_scalar_ptr);
-			Init0 = WN_Stid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar), Init0);
-			WN_INSERT_BlockLast(wn_parallelBlock, Init0);
-		}
-	}
-	/*********************************************************/
 	//Create private data list
 	int iPivateCount = 0;
-	if(acc_private_nodes)
+	/*if(acc_private_nodes)
 	{
 		WN* wn_node = acc_private_nodes;
 	    char szlocalname[256];	  
@@ -7916,8 +8047,102 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 			var.new_st = st_new_private;
 		    acc_local_new_var_map[st_private] = var;
 		}		
+	}*/
+	map<ST*, ACC_SCALAR_VAR_INFO*>::iterator itor_offload_info = acc_offload_scalar_management_tab.begin();
+	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
+	{
+		ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+	    char szlocalname[256];	  
+		//several cases:
+		//1. ACC_SCALAR_VAR_IN, ACC_SCALAR_VAR_OUT and  ACC_SCALAR_VAR_INOUT
+		//the new private var is created during kernel parameter generation
+		//2. ACC_SCALAR_VAR_PRIVATE 2.1 the new private var is created during kernel parameter generation if it is reduction var
+		//							 2.2  else the new private var is going to created.
+		if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_PRIVATE && pVarInfo->is_reduction== FALSE)
+		{
+			ST* st_private = pVarInfo->st_var;
+			TY_IDX index_ty = ST_type(st_private);
+		    ST* st_new_private = New_ST( CURRENT_SYMTAB );
+	    	sprintf ( szlocalname, "%s", ST_name(st_private));
+			ST_Init(st_new_private,
+		      Save_Str( szlocalname),
+		      CLASS_VAR,
+		      SCLASS_AUTO,
+		      EXPORT_LOCAL,
+		      index_ty);//Put this variables in local table
+			ACC_VAR_TABLE var;
+			var.has_offset = FALSE;
+			var.orig_st = st_private;
+			var.new_st = st_new_private;
+		    acc_local_new_var_map[st_private] = var;
+		}
 	}
-
+	/*********************************************************/
+	//Init IN/OUT scalar variables
+	/*{	
+		map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
+		for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
+		{
+			ST* st_scalar = itor->second->st_device_scalar;
+			ST* st_scalar_ptr = itor->second->st_device_ptr_on_kernel;
+			TY_IDX elem_ty = ST_type(st_scalar);			
+			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
+			WN* Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, wn_scalar_ptr);
+			Init0 = WN_Stid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar), Init0);
+			WN_INSERT_BlockLast(wn_parallelBlock, Init0);
+		}
+	}*/
+	//Init IN/OUT scalar variables
+	//map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
+	itor_offload_info = acc_offload_scalar_management_tab.begin();
+	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
+	{
+		ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+		//several cases:
+		//1. ACC_SCALAR_VAR_IN, initialized in parameter
+		//2. ACC_SCALAR_VAR_OUT : no init
+		//3. ACC_SCALAR_VAR_INOUT: need init
+		//2. ACC_SCALAR_VAR_PRIVATE no init
+		if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT)
+		{
+			ST* st_scalar = pVarInfo->st_device_in_klocal;
+			ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
+			TY_IDX elem_ty = ST_type(st_scalar);			
+			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
+			WN* Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, wn_scalar_ptr);
+			Init0 = WN_Stid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar), Init0);
+			WN_INSERT_BlockLast(wn_parallelBlock, Init0);
+		}
+	}
+	
+	//Set up predefined variable in CUDA
+	threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
+					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+	threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
+					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
+	threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
+					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
+	
+	blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
+					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
+	blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
+					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
+	blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
+					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
+	
+	blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
+					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
+	blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
+					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
+	blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
+					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
+	
+	griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
+					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
+	griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
+					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
+	griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
+					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
 	//Begin transform the loop
 	if(acc_parallel_loop_info.wn_prehand_nodes)
 	{
@@ -7939,7 +8164,7 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	ACC_Localize_Parent_Stack lps(FALSE, NULL);
 	/*********************************************************************/
 	//Init IN/OUT scalar variables
-	{	
+	/*{	
 		map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
 		for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
 		{
@@ -7964,6 +8189,50 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 								wn_scalar_ptr, Init0);
 			WN_INSERT_BlockLast(wn_parallelBlock, Init0);
 		}		
+	}*/
+	
+	//Init IN/OUT scalar variables
+	{
+		
+		WN* test1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+					WN_COPY_Tree(threadidx), 
+					WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+		WN* test2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_y)), 
+					WN_COPY_Tree(threadidy), 
+					WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_y)), 0));
+		WN* test3 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_blockIdx_x)), 
+					WN_COPY_Tree(blockidx), 
+					WN_Intconst(TY_mtype(ST_type(glbl_blockIdx_x)), 0));
+		WN* wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, test1, test2);
+		wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, wn_If_stmt_test, test3);
+		WN* wn_thenblock = WN_CreateBlock();
+		WN* wn_elseblock = WN_CreateBlock();
+		
+		itor_offload_info = acc_offload_scalar_management_tab.begin();
+		for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
+		{
+			ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+			//several cases:
+			//1. ACC_SCALAR_VAR_IN, initialized in parameter
+			//2. ACC_SCALAR_VAR_OUT : no init
+			//3. ACC_SCALAR_VAR_INOUT: need init
+			//2. ACC_SCALAR_VAR_PRIVATE no init
+			if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT 
+				|| pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_OUT)
+			{				
+				ST* st_scalar = pVarInfo->st_device_in_klocal;
+				ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
+				TY_IDX elem_ty = ST_type(st_scalar);
+				WN* Init0 = WN_Ldid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar));
+				WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
+				Init0 = WN_Istore(TY_mtype(elem_ty), 0, Make_Pointer_Type(elem_ty), 
+									wn_scalar_ptr, Init0);
+				
+				WN_INSERT_BlockLast(wn_thenblock, Init0);
+			}
+		}
+		WN* wn_scalar_out = WN_CreateIf(wn_If_stmt_test, wn_thenblock, WN_CreateBlock());
+		WN_INSERT_BlockLast(wn_parallelBlock, wn_scalar_out);
 	}
 	/*********************************************************************/
 	ACC_Walk_and_Localize(wn_parallelBlock);
@@ -8588,7 +8857,7 @@ static void ACC_Finalize_Liveness_Chain()
 	}
 }
 
-static void ACC_Retrieve_Kernel_Param_From_Liveness()
+/*static void ACC_Retrieve_Kernel_Param_From_Liveness()
 {
 	map<ST*, ACC_VAR_Liveness*>::iterator itor = acc_mapLiveness.begin();
 	while(itor != acc_mapLiveness.end())
@@ -8648,7 +8917,7 @@ static void ACC_Retrieve_Kernel_Param_From_Liveness()
 		//move to next
 		itor ++;
 	}
-}
+}*/
 
 /*To get the in/out liveness analysis for the ACC code region, 
 Scan the code folllowing right behind the acc region
@@ -8659,7 +8928,7 @@ use:		in			in
 usedef:	in			inout
 defuse:	private		out
 */
-static void
+/*static void
 ACC_Region_LivenessAnalysis (WN * tree)
 {
 	
@@ -8672,17 +8941,17 @@ ACC_Region_LivenessAnalysis (WN * tree)
 	WN_OFFSET old_offset;
 	ACC_VAR_Liveness *w;
 	
-	/* Ignore NULL subtrees. */
+	// Ignore NULL subtrees. /
 	
 	if (tree == NULL)
 	  return;
 	
-	/* Initialization. */
+	// Initialization. //
 	
 	op = WN_opcode(tree);
 	opr = OPCODE_operator(op);
 	
-	/* Look for and replace any nodes referencing localized symbols */
+	// Look for and replace any nodes referencing localized symbols //
 	//use
 	if (opr == OPR_LDID) 
 	{
@@ -8748,7 +9017,7 @@ ACC_Region_LivenessAnalysis (WN * tree)
 	}	
 	
 	
-	/* Walk all children */
+	// Walk all children //
 	
 	//lps->Push(tree);
 	if (op == OPC_BLOCK) 
@@ -8815,7 +9084,7 @@ ACC_Region_LivenessAnalysis_cont (WN * tree )
 		ACC_Region_LivenessAnalysis(cont);
 		cont = WN_next(cont);
 	}
-}
+}*/
 
 /*Scan the block/region and generate the variable status: 
 		def(store) 			use(load)
@@ -8825,7 +9094,7 @@ use:		usedef		use
 usedef:	usedef		usedef
 defuse:	defuse		defuse
 */
-static void
+/*static void
 ACC_Region_DefUseAnalysis (WN * tree, void* pRegionInfo, BOOL isKernelRegion)
 {
   OPCODE op;
@@ -8837,17 +9106,17 @@ ACC_Region_DefUseAnalysis (WN * tree, void* pRegionInfo, BOOL isKernelRegion)
   WN_OFFSET old_offset;
   ACC_VAR_Liveness *w;
 
-  /* Ignore NULL subtrees. */
+  // Ignore NULL subtrees. //
 
   if (tree == NULL)
     return;
 
-  /* Initialization. */
+  // Initialization. //
 
   op = WN_opcode(tree);
   opr = OPCODE_operator(op);
 
-  /* Look for and replace any nodes referencing localized symbols */
+  // Look for and replace any nodes referencing localized symbols //
   //use
   if (opr == OPR_LDID) 
   {
@@ -8912,7 +9181,7 @@ ACC_Region_DefUseAnalysis (WN * tree, void* pRegionInfo, BOOL isKernelRegion)
   }
   
 
-  /* Walk all children */
+  // Walk all children //
 
   //lps->Push(tree);
   if (op == OPC_BLOCK) 
@@ -8966,7 +9235,7 @@ ACC_Region_DefUseAnalysis (WN * tree, void* pRegionInfo, BOOL isKernelRegion)
   //lps->Pop();
 
   return;
-}   
+}   */
 
 static WN* ACC_Make_Array_ref(ST *base, WN* wn_offset, WN* wn_dim)
 {
@@ -9476,21 +9745,21 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
   acc_nested_dregion_info.Depth = 0;
   acc_nested_dregion_info.DRegionInfo.clear();
   
-  ssize = 4096 * sizeof(ACC_SHARED_TABLE);
-  acc_copyin_table = (ACC_SHARED_TABLE *) alloca ( ssize );
-  BZERO ( acc_copyin_table, ssize );
+  //ssize = 4096 * sizeof(ACC_SHARED_TABLE);
+  //acc_copyin_table = (ACC_SHARED_TABLE *) alloca ( ssize );
+  //BZERO ( acc_copyin_table, ssize );
   
-  ssize = 4096 * sizeof(ACC_SHARED_TABLE);
-  acc_copyout_table = (ACC_SHARED_TABLE *) alloca ( ssize );
-  BZERO ( acc_copyout_table, ssize );
+  //ssize = 4096 * sizeof(ACC_SHARED_TABLE);
+  //acc_copyout_table = (ACC_SHARED_TABLE *) alloca ( ssize );
+  //BZERO ( acc_copyout_table, ssize );
   
-  ssize = 4096 * sizeof(ACC_SHARED_TABLE);
-  acc_copy_table = (ACC_SHARED_TABLE *) alloca ( ssize );
-  BZERO ( acc_copy_table, ssize );
+  //ssize = 4096 * sizeof(ACC_SHARED_TABLE);
+  //acc_copy_table = (ACC_SHARED_TABLE *) alloca ( ssize );
+  //BZERO ( acc_copy_table, ssize );
   	
-  ssize = 4096 * sizeof(ACC_SHARED_TABLE);
-  acc_parm_table = (ACC_SHARED_TABLE *) alloca ( ssize );
-  BZERO ( acc_parm_table, ssize );
+  //ssize = 4096 * sizeof(ACC_SHARED_TABLE);
+  //acc_parm_table = (ACC_SHARED_TABLE *) alloca ( ssize );
+  //BZERO ( acc_parm_table, ssize );
 
   start_processing:
 
@@ -9690,6 +9959,76 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
 	WN_Delete (wn_replace_block );
     
     return (return_nodes);
+}
+
+static void ACC_Process_scalar_variable_for_offload_region()
+{
+	//acc_offload_scalar_management_tab
+	UINT32 vindex;
+	for(vindex=0; vindex<acc_dregion_inout_scalar.size(); vindex++)
+	{
+		ACC_DREGION__ENTRY entry = acc_dregion_inout_scalar[vindex];
+		//Now only scalar var is supported in private/first private/lastprivate/inout pragma
+		//ignore length clause
+		ST* st_var = WN_st(entry.acc_data_clauses);
+		ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_var];
+		if(pVarInfo)
+			delete pVarInfo;
+		pVarInfo = new ACC_SCALAR_VAR_INFO;
+		acc_offload_scalar_management_tab[st_var] = pVarInfo;
+		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_INOUT;
+		pVarInfo->st_var = st_var;
+		pVarInfo->is_reduction = FALSE;
+	}
+	for(vindex=0; vindex<acc_dregion_lprivate.size(); vindex++)
+	{
+		ACC_DREGION__ENTRY entry = acc_dregion_lprivate[vindex];
+		//Now only scalar var is supported in private/first private/lastprivate/inout pragma
+		//ignore length clause
+		ST* st_var = WN_st(entry.acc_data_clauses);
+		ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_var];
+		if(pVarInfo)
+			delete pVarInfo;
+		pVarInfo = new ACC_SCALAR_VAR_INFO;
+		acc_offload_scalar_management_tab[st_var] = pVarInfo;
+		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_OUT;
+		pVarInfo->st_var = st_var;
+		pVarInfo->is_reduction = FALSE;
+	}
+	for(vindex=0; vindex<acc_dregion_fprivate.size(); vindex++)
+	{
+		ACC_DREGION__ENTRY entry = acc_dregion_fprivate[vindex];
+		//Now only scalar var is supported in private/first private/lastprivate/inout pragma
+		//ignore length clause
+		ST* st_var = WN_st(entry.acc_data_clauses);
+		ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_var];
+		if(pVarInfo)
+			delete pVarInfo;
+		pVarInfo = new ACC_SCALAR_VAR_INFO;
+		acc_offload_scalar_management_tab[st_var] = pVarInfo;
+		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_IN;
+		pVarInfo->st_var = st_var;
+		pVarInfo->is_reduction = FALSE;
+	}
+	for(vindex=0; vindex<acc_dregion_private.size(); vindex++)
+	{
+		ACC_DREGION__ENTRY entry = acc_dregion_private[vindex];
+		//Now only scalar var is supported in private/first private/lastprivate/inout pragma
+		//ignore length clause
+		ST* st_var = WN_st(entry.acc_data_clauses);
+		ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_var];
+		if(pVarInfo)
+			delete pVarInfo;
+		pVarInfo = new ACC_SCALAR_VAR_INFO;
+		acc_offload_scalar_management_tab[st_var] = pVarInfo;
+		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_PRIVATE;
+		pVarInfo->st_var = st_var;
+		pVarInfo->is_reduction = FALSE;
+	}
+	//acc_dregion_private;		
+	//acc_dregion_fprivate;	
+	//acc_dregion_lprivate;
+	//acc_dregion_inout_scalar;
 }
 
 static ST* ACC_GenSingleCreateAndMallocDeviceMem(ACC_DREGION__ENTRY dEntry, 
@@ -10395,6 +10734,48 @@ static void ACC_Process_Clause_Pragma(WN * tree)
 					 WN_Delete ( wn_cur_node );
 				   break;
 				   
+				 case WN_PRAGMA_ACC_CLAUSE_LAST_PRIVATE:
+				   for (wn = acc_lastprivate_nodes; wn; wn = WN_next(wn))
+					 if (ACC_Identical_Pragmas(wn_cur_node, wn))
+				   break;
+				   //the next node  must be node data length
+				   //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+				   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+				   
+				   if (wn == NULL) {
+				   	 ACC_DREGION__ENTRY entry;
+					 entry.acc_data_clauses = wn_cur_node;
+					 entry.acc_data_length = acc_dlength_node;
+					 acc_dregion_lprivate.push_back(entry);
+					 //////////////////////////////////////
+					 WN_next(wn_cur_node) = acc_lastprivate_nodes;
+					 acc_lastprivate_nodes = wn_cur_node;
+					 //++acc_firstprivate_count;
+				   } else
+					 WN_Delete ( wn_cur_node );
+				   break;
+				   
+				 case WN_PRAGMA_ACC_CLAUSE_INOUT_SCALAR:
+				   for (wn = acc_inout_nodes; wn; wn = WN_next(wn))
+					 if (ACC_Identical_Pragmas(wn_cur_node, wn))
+				   break;
+				   //the next node  must be node data length
+				   //(WN_opcode(wn_next_node) == OPC_XPRAGMA)
+				   acc_dlength_node = WN_COPY_Tree(WN_kid0(wn_next_node));
+				   
+				   if (wn == NULL) {
+				   	 ACC_DREGION__ENTRY entry;
+					 entry.acc_data_clauses = wn_cur_node;
+					 entry.acc_data_length = acc_dlength_node;
+					 acc_dregion_inout_scalar.push_back(entry);
+					 //////////////////////////////////////
+					 WN_next(wn_cur_node) = acc_inout_nodes;
+					 acc_inout_nodes = wn_cur_node;
+					 //++acc_firstprivate_count;
+				   } else
+					 WN_Delete ( wn_cur_node );
+				   break;
+				   
 				 case WN_PRAGMA_ACC_CLAUSE_NUM_GANGS:
 				   wn = acc_num_gangs_node; //only one stmt allowed.
 				   if (wn == NULL) {
@@ -10471,7 +10852,7 @@ static WN* ACC_Generate_KernelParameters(WN* paramlist, void* pRegionInfo, BOOL 
 	KernelsRegionInfo* pKernelsRegionInfo;
 	WN* wn;
 	//Process scalar in/out variables first.
-	map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
+	/*map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
 	for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
 	{
 		KernelParameter kparam;
@@ -10488,7 +10869,7 @@ static WN* ACC_Generate_KernelParameters(WN* paramlist, void* pRegionInfo, BOOL 
 		kparam.st_host = pInfo->st_host;
 		kparam.st_device = pInfo->st_device_ptr_on_host;
 		acc_kernelLaunchParamList.push_back(kparam);
-	}
+	}*/
 	///////////////////////////////////////////////////////////////////////////////////
 	///////////////////////////////////////////////////////////////////////////////////
 	if(isKernelRegion)
@@ -10508,8 +10889,19 @@ static WN* ACC_Generate_KernelParameters(WN* paramlist, void* pRegionInfo, BOOL 
 			{
 				KernelParameter kparam;
 				isFound = TRUE;
+				if(acc_offload_scalar_management_tab.find(st_param) == acc_offload_scalar_management_tab.end())
+				{
+					Fail_FmtAssertion("ACC_Generate_KernelParameters: illegal parameters, kernels param:%s undefined in scalar acc pragma(in/out/private).",
+									ST_name(st_param));
+				}
 				kparam.st_host = st_param;
-				kparam.st_device = NULL;
+				ACC_SCALAR_VAR_INFO* pInfo = acc_offload_scalar_management_tab[st_param];
+				if(pInfo->acc_scalar_type==ACC_SCALAR_VAR_IN)
+					kparam.st_device = NULL;
+				//private never appears in parameters' list
+				else //if(pInfo->acc_scalar_type==ACC_SCALAR_VAR_INOUT || pInfo->acc_scalar_type==ACC_SCALAR_VAR_OUT) 
+					kparam.st_device = pInfo->st_device_in_host;
+				
 				acc_kernelLaunchParamList.push_back(kparam);
 				continue;
 			}
@@ -10748,7 +11140,19 @@ static WN* ACC_Generate_KernelParameters(WN* paramlist, void* pRegionInfo, BOOL 
 				KernelParameter kparam;
 				isFound = TRUE;
 				kparam.st_host = st_param;
-				kparam.st_device = NULL;
+				if(acc_offload_scalar_management_tab.find(st_param) == acc_offload_scalar_management_tab.end())
+				{
+					Fail_FmtAssertion("ACC_Generate_KernelParameters: illegal parameters, kernels param:%s undefined in scalar acc pragma(in/out/private).",
+									ST_name(st_param));
+				}
+				kparam.st_host = st_param;
+				ACC_SCALAR_VAR_INFO* pInfo = acc_offload_scalar_management_tab[st_param];
+				if(pInfo->acc_scalar_type==ACC_SCALAR_VAR_IN)
+					kparam.st_device = NULL;
+				//private never appears in parameters' list
+				else //if(pInfo->acc_scalar_type==ACC_SCALAR_VAR_INOUT || pInfo->acc_scalar_type==ACC_SCALAR_VAR_OUT) 
+					kparam.st_device = pInfo->st_device_in_host;
+				
 				acc_kernelLaunchParamList.push_back(kparam);
 				continue;
 			}
@@ -10976,7 +11380,7 @@ static WN* ACC_Generate_KernelParameters(WN* paramlist, void* pRegionInfo, BOOL 
 //acc_map_scalar_inout
 //acc_map_scalar_out
 /*Create single scalar VAR for device memory from host side*/
-static ST* ACC_Create_Single_Scalar_Variable(ST* st_var, ACC_SCALAR_INOUT_INFO* pInfo)
+static ST* ACC_Create_Single_Scalar_Variable(ST* st_var, ACC_SCALAR_VAR_INFO* pInfo)
 {	
 		//ST* st_var = acc_scalar_inout_nodes[i];
 		TY_IDX ty_var = ST_type(st_var);
@@ -10994,8 +11398,9 @@ static ST* ACC_Create_Single_Scalar_Variable(ST* st_var, ACC_SCALAR_INOUT_INFO* 
 				EXPORT_LOCAL,
 				ty_p);
 		//ACC_SCALAR_INOUT_INFO* pSTMap = new ACC_SCALAR_INOUT_INFO;
-		pInfo->st_host = st_var;
-		pInfo->st_device_ptr_on_host = karg;
+		//pInfo->st_host = st_var;
+		pInfo->st_device_in_host = karg;
+		//pInfo-> = karg;
 }
 
 /****************************************************************************/
@@ -11003,25 +11408,46 @@ static ST* ACC_Create_Single_Scalar_Variable(ST* st_var, ACC_SCALAR_INOUT_INFO* 
 /****************************************************************************/
 static void ACC_Scalar_Variable_CreateAndCopyInOut(WN* wn_replace_block)
 {
-	int i = 0;
-	for(i=0; i<acc_scalar_inout_nodes.size(); i++)
+	map<ST*, ACC_SCALAR_VAR_INFO*>::iterator itor_offload_info = acc_offload_scalar_management_tab.begin();
+	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
 	{
-		WN* wn_start, *wn_size;
-		ST* st_host = acc_scalar_inout_nodes[i];
-		TY_IDX ty_host = ST_type(st_host);
-		UINT32 ty_size = TY_size(ty_host);
-		wn_start = WN_Intconst(MTYPE_U4, 0);
-		wn_size = WN_Intconst(MTYPE_U4, ty_size);
-		ACC_SCALAR_INOUT_INFO* pSTMap = new ACC_SCALAR_INOUT_INFO;
-		ACC_Create_Single_Scalar_Variable(st_host, pSTMap);
-		pSTMap->isize = ty_size;
-		acc_map_scalar_inout[st_host] = pSTMap;
-		WN* wn_H2D = Gen_DeviceMalloc(st_host, pSTMap->st_device_ptr_on_host, WN_COPY_Tree(wn_size));
-		WN_INSERT_BlockLast(wn_replace_block, wn_H2D);
-		wn_H2D = Gen_DataH2D(st_host, pSTMap->st_device_ptr_on_host, wn_size, wn_start);
-		WN_INSERT_BlockLast(wn_replace_block, wn_H2D);
+		ACC_SCALAR_VAR_INFO* pInfo = itor_offload_info->second;
+		if(pInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT)
+		{
+			WN* wn_start, *wn_size;
+			ST* st_host = pInfo->st_var;
+			TY_IDX ty_host = ST_type(st_host);
+			UINT32 ty_size = TY_size(ty_host);
+			wn_start = WN_Intconst(MTYPE_U4, 0);
+			wn_size = WN_Intconst(MTYPE_U4, ty_size);
+			//ACC_SCALAR_INOUT_INFO* pSTMap = new ACC_SCALAR_INOUT_INFO;
+			ACC_Create_Single_Scalar_Variable(st_host, pInfo);
+			pInfo->isize = ty_size;
+			//acc_map_scalar_inout[st_host] = pSTMap;
+			WN* wn_H2D = Gen_DeviceMalloc(st_host, pInfo->st_device_in_host, WN_COPY_Tree(wn_size));
+			WN_INSERT_BlockLast(wn_replace_block, wn_H2D);
+			wn_H2D = Gen_DataH2D(st_host, pInfo->st_device_in_host, wn_size, wn_start);
+			WN_INSERT_BlockLast(wn_replace_block, wn_H2D);
+		}
+		else if(pInfo->acc_scalar_type == ACC_SCALAR_VAR_OUT)
+		{
+			WN* wn_start, *wn_size;
+			ST* st_host = pInfo->st_var;
+			TY_IDX ty_host = ST_type(st_host);
+			UINT32 ty_size = TY_size(ty_host);
+			wn_start = WN_Intconst(MTYPE_U4, 0);
+			wn_size = WN_Intconst(MTYPE_U4, ty_size);
+			//ACC_SCALAR_INOUT_INFO* pSTMap = new ACC_SCALAR_INOUT_INFO;
+			ACC_Create_Single_Scalar_Variable(st_host, pInfo);
+			pInfo->isize = ty_size;
+			//if(acc_map_scalar_inout[st_host])
+			//	delete acc_map_scalar_inout[st_host];
+			//acc_map_scalar_inout[st_host] = pSTMap;
+			WN* wn_H2D = Gen_DeviceMalloc(st_host, pInfo->st_device_in_host, WN_COPY_Tree(wn_size));
+			WN_INSERT_BlockLast(wn_replace_block, wn_H2D);
+		}
 	}
-	for(i=0; i<acc_scalar_out_nodes.size(); i++)
+	/*for(i=0; i<acc_scalar_out_nodes.size(); i++)
 	{
 		WN* wn_start, *wn_size;
 		ST* st_host = acc_scalar_out_nodes[i];
@@ -11039,7 +11465,7 @@ static void ACC_Scalar_Variable_CreateAndCopyInOut(WN* wn_replace_block)
 		WN_INSERT_BlockLast(wn_replace_block, wn_H2D);
 		//WN* wn_H2D = Gen_DataH2D(st_host, pSTMap->st_device_ptr_on_host, wn_size, wn_start);
 		//WN_INSERT_BlockLast(wn_replace_block, wn_H2D);		
-	}
+	}*/
 }
 
 /*****************************************************************************/
@@ -11047,7 +11473,48 @@ static void ACC_Scalar_Variable_CreateAndCopyInOut(WN* wn_replace_block)
 /*****************************************************************************/
 static void ACC_Scalar_Variable_Copyout(WN* wn_replace_block)
 {
-	map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
+	map<ST*, ACC_SCALAR_VAR_INFO*>::iterator itor_offload_info = acc_offload_scalar_management_tab.begin();
+	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
+	{
+		ACC_SCALAR_VAR_INFO* pInfo = itor_offload_info->second;
+		if(pInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT)
+		{
+			WN* wn_start;
+			WN* wn_size;
+			ST* st_host = pInfo->st_var;
+			ST* st_device = pInfo->st_device_in_host;
+			TY_IDX ty_host = ST_type(st_host);
+			UINT32 ty_size = TY_size(ty_host);
+			wn_start = WN_Intconst(MTYPE_U4, 0);
+			wn_size = WN_Intconst(MTYPE_U4, ty_size);
+			WN* wn_D2H = Gen_DataD2H(st_device, st_host, wn_size, wn_start);
+			WN_INSERT_BlockLast(wn_replace_block, wn_D2H);
+			//free buffer
+			wn_D2H = ACC_GenFreeDeviceMemory(st_device);
+			WN_INSERT_BlockLast(wn_replace_block, wn_D2H);
+			delete pInfo;
+		}
+		else if(pInfo->acc_scalar_type == ACC_SCALAR_VAR_OUT)
+		{
+			WN* wn_start, *wn_size;
+			ST* st_host = pInfo->st_var;
+			ST* st_device = pInfo->st_device_in_host;
+			TY_IDX ty_host = ST_type(st_host);
+			UINT32 ty_size = TY_size(ty_host);
+			wn_start = WN_Intconst(MTYPE_U4, 0);
+			wn_size = WN_Intconst(MTYPE_U4, ty_size);
+			WN* wn_D2H = Gen_DataD2H(st_device, st_host, wn_size, wn_start);
+			WN_INSERT_BlockLast(wn_replace_block, wn_D2H);
+			//free buffer
+			wn_D2H = ACC_GenFreeDeviceMemory(st_device);
+			WN_INSERT_BlockLast(wn_replace_block, wn_D2H);	
+			delete pInfo;
+		}
+		else
+			delete pInfo;
+		itor_offload_info->second =NULL;
+	}
+	/*map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
 	for(itor = acc_map_scalar_inout.begin(); itor!=acc_map_scalar_inout.end(); itor++)
 	{
 		WN* wn_start;
@@ -11081,7 +11548,7 @@ static void ACC_Scalar_Variable_Copyout(WN* wn_replace_block)
 		wn_D2H = ACC_GenFreeDeviceMemory(st_device);
 		WN_INSERT_BlockLast(wn_replace_block, wn_D2H);	
 		delete itor->second;
-	}
+	}*/
 }
 
 
@@ -11115,7 +11582,10 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	kernelsRegionInfo.acc_dregion_present = acc_dregion_present;
 	kernelsRegionInfo.acc_dregion_private = acc_dregion_private;		
 	kernelsRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;
-
+	kernelsRegionInfo.acc_dregion_lprivate = acc_dregion_lprivate;
+	kernelsRegionInfo.acc_dregion_inout_scalar = acc_dregion_inout_scalar;
+	//process scalar variables
+	ACC_Process_scalar_variable_for_offload_region();
 	//async expr
 	if(acc_async_nodes)
 	{		
@@ -11178,6 +11648,10 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	acc_present_or_create_nodes = NULL;
 	acc_deviceptr_nodes = NULL;
 	acc_async_nodes = NULL;
+	acc_private_nodes =NULL;
+	acc_firstprivate_nodes =NULL;
+	acc_lastprivate_nodes =NULL;
+	acc_inout_nodes =NULL;
 			  
 	acc_dregion_pcreate.clear();
 	acc_dregion_pcopy.clear();
@@ -11188,6 +11662,8 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	acc_dregion_device.clear();
 	acc_dregion_private.clear();
 	acc_dregion_fprivate.clear();
+	acc_dregion_lprivate.clear();
+	acc_dregion_inout_scalar.clear();
 	//Handling the data analysis	
 	
 	//Generating kernel parameter lists from in/out chain
@@ -11206,7 +11682,7 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	ACC_Dump_InOutAnalysis(acc_pHeadLiveness);
 	ACC_Free_DefUse_Chain(&acc_pHeadLiveness);*/
 	//Generating kernel parameter lists from in/out chain
-	ACC_Region_DefUseAnalysis(tree, &kernelsRegionInfo, TRUE);
+	/*ACC_Region_DefUseAnalysis(tree, &kernelsRegionInfo, TRUE);
 	ACC_Region_LivenessAnalysis_cont(wn_cont);
 	int i = acc_nested_dregion_info.Depth - 1;
 	while(i>=0)
@@ -11224,7 +11700,7 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	kernelsRegionInfo.acc_param = NULL; //acc_parms_nodes;
 	//////////////////////////////////////////////////
 	ACC_Dump_InOutAnalysis();
-	ACC_Free_DefUse_Chain();
+	ACC_Free_DefUse_Chain();*/
 	/******************************************************************/
 	//Generate scalar value in/out processing, from liveness analysis results
 	ACC_Scalar_Variable_CreateAndCopyInOut(kernelsBlock);
@@ -11250,10 +11726,11 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	/****************************************************************************/
 	/*Copyout the data and clear the vectors and map buffer*/
 	ACC_Scalar_Variable_Copyout(kernelsBlock);
-	acc_scalar_inout_nodes.clear();
-	acc_scalar_out_nodes.clear();
-	acc_map_scalar_inout.clear();
-	acc_map_scalar_out.clear();
+	acc_offload_scalar_management_tab.clear();
+	//acc_scalar_inout_nodes.clear();
+	//acc_scalar_out_nodes.clear();
+	//acc_map_scalar_inout.clear();
+	//acc_map_scalar_out.clear();
 	/****************************************************************************/
 	//Free device memory
 	if(kernelsRegionInfo.acc_present_or_copyin_nodes)
@@ -11467,7 +11944,12 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	parallelRegionInfo.acc_dregion_pcopyout = acc_dregion_pcopyout;		
 	parallelRegionInfo.acc_dregion_present = acc_dregion_present;
 	parallelRegionInfo.acc_dregion_private = acc_dregion_private;		
-	parallelRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;
+	parallelRegionInfo.acc_dregion_fprivate = acc_dregion_fprivate;	
+	parallelRegionInfo.acc_dregion_lprivate = acc_dregion_lprivate;
+	parallelRegionInfo.acc_dregion_inout_scalar = acc_dregion_inout_scalar;
+
+	//process scalar variables
+	ACC_Process_scalar_variable_for_offload_region();
 
 	//async expr
 	if(acc_async_nodes)
@@ -11517,7 +11999,7 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 		ACC_GenDevicePtr(acc_deviceptr_nodes, 
   										&parallelRegionInfo.dptrList);
 	}
-		
+	//Let's process scalar variable
 	//reset them
 	acc_if_node = NULL;
 	acc_copy_nodes = NULL;	  /* Points to (optional) copy nodes */
@@ -11531,6 +12013,10 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	acc_present_or_create_nodes = NULL;
 	acc_deviceptr_nodes = NULL;
 	acc_async_nodes = NULL;
+	acc_private_nodes =NULL;
+	acc_firstprivate_nodes =NULL;
+	acc_lastprivate_nodes =NULL;
+	acc_inout_nodes =NULL;
 	
 			  
 	acc_dregion_pcreate.clear();
@@ -11542,31 +12028,32 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	acc_dregion_device.clear();
 	acc_dregion_private.clear();
 	acc_dregion_fprivate.clear();
+	acc_dregion_lprivate.clear();
+	acc_dregion_inout_scalar.clear();
 	acc_local_new_var_map.clear();
 	acc_reduction_count = 0;
 	
-    acc_scalar_inout_nodes.clear();
-    acc_scalar_out_nodes.clear();
+    
 	
 	//Generating kernel parameter lists from in/out chain
-	ACC_Region_DefUseAnalysis(tree, &parallelRegionInfo, FALSE);
-	ACC_Region_LivenessAnalysis_cont(wn_cont);
-	int i = acc_nested_dregion_info.Depth - 1;
-	while(i>=0)
-	{
-	  	SingleDRegionInfo sDRegionInfo = 
-			acc_nested_dregion_info.DRegionInfo[i];
-		ACC_Region_LivenessAnalysis_cont(sDRegionInfo.wn_cont_nodes);
-		i--;
-	}
+	//ACC_Region_DefUseAnalysis(tree, &parallelRegionInfo, FALSE);
+	//ACC_Region_LivenessAnalysis_cont(wn_cont);
+	//int i = acc_nested_dregion_info.Depth - 1;
+	//while(i>=0)
+	//{
+	//  	SingleDRegionInfo sDRegionInfo = 
+	//		acc_nested_dregion_info.DRegionInfo[i];
+	//	ACC_Region_LivenessAnalysis_cont(sDRegionInfo.wn_cont_nodes);
+	//	i--;
+	//}
 
-	ACC_Finalize_Liveness_Chain();
-	acc_parms_nodes = NULL;
-	ACC_Retrieve_Kernel_Param_From_Liveness();	
-	parallelRegionInfo.acc_param = NULL; //acc_parms_nodes;
-	parallelRegionInfo.acc_private = acc_private_nodes;
-	ACC_Dump_InOutAnalysis();
-	ACC_Free_DefUse_Chain();
+	//ACC_Finalize_Liveness_Chain();
+	//acc_parms_nodes = NULL;
+	//ACC_Retrieve_Kernel_Param_From_Liveness();	
+	//parallelRegionInfo.acc_param = NULL; //acc_parms_nodes;
+	//parallelRegionInfo.acc_private = acc_private_nodes;
+	//ACC_Dump_InOutAnalysis();
+	//ACC_Free_DefUse_Chain();
 	/******************************************************************/
 	//Generate scalar value in/out processing, from liveness analysis results
 	ACC_Scalar_Variable_CreateAndCopyInOut(parallelBlock);
@@ -11585,10 +12072,7 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	/****************************************************************************/
 	/*Copyout the data and clear the vectors and map buffer*/
 	ACC_Scalar_Variable_Copyout(parallelBlock);
-	acc_scalar_inout_nodes.clear();
-	acc_scalar_out_nodes.clear();
-	acc_map_scalar_inout.clear();
-	acc_map_scalar_out.clear();
+	acc_offload_scalar_management_tab.clear();
 	/****************************************************************************/
 	if(parallelRegionInfo.acc_present_or_copyout_nodes)
 		ACC_GenDataCopyOut(&parallelRegionInfo.pcopyoutMap, parallelBlock);
@@ -11598,6 +12082,7 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	if(acc_AsyncExpr)
 		WN_Delete(acc_AsyncExpr);
 	acc_AsyncExpr = NULL;
+	
 	/****************************************************************************/
 	//Free device memory
 	if(parallelRegionInfo.acc_present_or_copyin_nodes)

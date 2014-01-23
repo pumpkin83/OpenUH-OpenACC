@@ -626,6 +626,7 @@ REGION_LEVEL RID_preopt_level(INT phase)
     case PREOPT_DUONLY_PHASE:	return RL_DU_PREOPT;
     case PREOPT_PHASE:		return RL_PREOPT;
     case MAINOPT_PHASE:		return RL_MAINOPT;
+    case PREOPT_OPENACC_LIVENESS:		return RL_LIVENESS_ACC;
   }
   Is_True(FALSE,("RID_preopt_level, Preopt called by unknown phase"));
   return RL_UNKNOWN; /* to satisfy compiler */

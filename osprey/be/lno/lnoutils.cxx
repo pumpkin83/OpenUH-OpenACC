@@ -3948,6 +3948,16 @@ extern BOOL Is_Mp_Region(WN *wn)
   return FALSE;
 }
 
+extern BOOL Is_ACC_Region(WN *wn)
+{
+  if (WN_opcode(wn) == OPC_REGION) {
+    RID *rid = REGION_get_rid(wn);
+    FmtAssert(rid != NULL, ("Is_ACC_Region(): Missing rid")); 
+    if (RID_TYPE_acc(rid)) return TRUE;
+  }
+  return FALSE;
+}
+
 #ifdef KEY
 extern BOOL Is_Eh_Or_Try_Region(WN *wn)
 {
@@ -3982,6 +3992,29 @@ extern BOOL Do_Loop_Is_Mp(WN *wn)
   DO_LOOP_INFO* dli = Get_Do_Loop_Info(wn); 
   if (dli != NULL && dli->Mp_Info != NULL) 
     return TRUE; 
+  return FALSE; 
+}
+
+extern BOOL Do_Loop_Is_ACC(WN *wn)
+{
+  if (LWN_Get_Parent(wn) == NULL)
+    return FALSE;
+  WN* wn_region = LWN_Get_Parent(LWN_Get_Parent(wn));
+#ifdef KEY
+  if (PU_cxx_lang(Get_Current_PU()) && Is_Eh_Or_Try_Region(wn_region))
+    wn_region = LWN_Get_Parent(LWN_Get_Parent(wn_region));
+#endif
+  if (!Is_ACC_Region(wn_region))
+    return FALSE; 
+  WN* wn_pragma = WN_first(WN_region_pragmas(wn_region));  
+  if (wn_pragma == NULL)
+    return FALSE;
+  if (WN_opcode(wn_pragma) == OPC_PRAGMA 
+    && (WN_pragma(wn_pragma) == WN_PRAGMA_ACC_LOOP_BEGIN))
+    return TRUE; 
+  //DO_LOOP_INFO* dli = Get_Do_Loop_Info(wn); 
+  //if (dli != NULL && dli->Mp_Info != NULL) 
+  //  return TRUE; 
   return FALSE; 
 }
 

@@ -100,6 +100,7 @@ typedef	enum {
   RL_RVI2,	/* processed by RVI emitter (phase 2)		*/
   RL_CG,        /* processed to the beginning of CG		*/
   RL_CGSCHED,   /* processed past CG scheduling			*/
+  RL_LIVENESS_ACC,   /* OPT liveness analysis for OpenACC offload region*/
   RL_LAST	/* > last legal value				*/
 } REGION_LEVEL;
 

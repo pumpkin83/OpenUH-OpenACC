@@ -109,6 +109,7 @@ static char *rcs_id = 	opt_emit_CXX"$Revision: 1.13 $";
 #include "opt_emit_template.h"
 #include "wssa_emitter.h"  // WSSA emitter
 #include "pu_info.h"
+#include "opt_dfa_openacc.h"
 
 #if defined(TARG_NVISA)
 // To get better loop depth comments in the ptx file
@@ -146,6 +147,8 @@ inline void
 BB_NODE::Gen_wn(EMITTER *emitter, BOOL copy_phi)
 {
   Gen_bb_wn(this, emitter);
+  if(OPT_Enable_OpenACC_Liveness_Analysis)
+  	dfa_def_use_info_bb_openacc(this);
   if (OPT_Enable_WHIRL_SSA && copy_phi &&
       Firststmt() != NULL &&
       WN_operator_is(Firststmt(), OPR_LABEL)) {
