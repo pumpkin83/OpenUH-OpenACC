@@ -17,7 +17,7 @@ typedef struct{
 } param_t;
 
 extern vector param_list;
-extern map_t map;
+extern acc_hashmap* map;
 extern cudaStream_t async_streams[12];
 extern int MODULE_BASE;
 
@@ -55,7 +55,7 @@ extern void __accr_push_kernel_param_double(double* dbValue);
 
 extern void __accr_clean_param_list();
 
-extern void __accr_get_device_addr(void* pHostAddr, 
+extern int __accr_get_device_addr(void* pHostAddr, 
 								   void** pDeviceAddr, 
 								   unsigned int istart, 
 								   unsigned int isize);

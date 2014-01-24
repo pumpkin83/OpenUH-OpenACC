@@ -14,7 +14,7 @@
 #include "acc_util.h"
 #include "acc_log.h"
 #include "vector.h"
-#include "hashmap.h"
+#include "acc_hashmap.h"
 
 #define max(a,b) (((a) > (b)) ? (a) : (b))
 #define min(a,b) (((a) < (b)) ? (a) : (b))
