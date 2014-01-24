@@ -594,6 +594,15 @@ public:
   BOOL         NULL_acc_type(void) const  { return _acc_type.Is_Empty(); }
   void         Clear_acc_type(void)       { _acc_type.Clear(); }
   void         Clear_acc_rid(void)        { _acc_rid.Clear(); }
+  BOOL         Is_ACC_Offload_Region(void)	{ 
+					return (!NULL_acc_type() && Top_acc_type() != ACC_DATAREGION);
+				}
+  BOOL         Is_ACC_DATA_Region(void)	{ 
+					return Top_acc_type() == ACC_DATAREGION;
+				}
+  BOOL         Inside_acc_do(void)        { return !NULL_acc_type() &&
+                                             Top_acc_type() == ACC_LOOP;
+                                         }
 
   void         Push_eh_rid(RID *rid)     { _eh_rid.Push(rid); }
   RID         *Pop_eh_rid(void)          { return _eh_rid.Pop(); }
@@ -604,6 +613,7 @@ public:
   BOOL         Inside_mp_do(void)        { return !NULL_mp_type() &&
                                              Top_mp_type() != MP_REGION;
                                          }
+  
 #if defined(TARG_SL) //PARA_EXTENSION
   // Assuming the SL2 parallel region has only one entry one exit
   void      Push_sl2_para_type(SL2_PARA_TY t)     { _sl2_para_type.Push(t);}
@@ -657,6 +667,8 @@ public:
   // Find a parallel region that dominates the given BB.
   // Note that the region encloses "bb" and does not start with it
   BB_NODE *Find_enclosing_parallel_region_bb( BB_NODE *);
+  BB_NODE *Find_enclosing_acc_offload_region_bb( BB_NODE *bb);
+
 #endif
 
   // Determine if this loop is the outermost one in a parallel region
