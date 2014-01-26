@@ -197,6 +197,12 @@ CFG::New_bb( BOOL connect, BB_KIND kind /*=BB_GOTO*/ )
   Append_bb( newbb );
 
   if (Inside_mp_do()) newbb->Set_MP_region();
+  else if (!NULL_acc_type()) 
+  {
+  	newbb->Set_ACC_region();
+	if(Is_ACC_Offload_Region())
+  		newbb->Set_ACC_offload_region();
+  }	
   return newbb;
 }
 
@@ -2001,6 +2007,7 @@ void
 CFG::Add_one_do_loop_stmt( WN *wn, END_BLOCK *ends_bb )
 {
   BOOL process_mp_do = Inside_mp_do();
+  BOOL process_acc_do = Inside_acc_do();
 
   Set_cur_loop_depth( Cur_loop_depth() + 1 );
 
@@ -2151,6 +2158,13 @@ CFG::Add_one_do_loop_stmt( WN *wn, END_BLOCK *ends_bb )
     else if (Top_mp_type() == MP_PDO) flags = (LOOP_FLAGS)(flags|MP_PDO);
     loopinfo->Set_flag(flags);
     merge_bb->Reset_MP_region();
+  }
+  if (process_acc_do) {
+    // top_mp_type contains loop_flag
+    if (Top_acc_type() == ACC_LOOP) flags = (LOOP_FLAGS)(flags|LOOP_IS_ACC_LOOP);
+    //else if (Top_mp_type() == MP_PDO) flags = (LOOP_FLAGS)(flags|MP_PDO);
+    loopinfo->Set_flag(flags);
+    merge_bb->Reset_ACC_region();
   }
 }
 
@@ -2676,11 +2690,14 @@ CFG::Add_one_region( WN *wn, END_BLOCK *ends_bb )
       Push_mp_type(MP_REGION);
     Push_mp_rid(rid);
   }
+  //by daniel tian, for OpenACC
   else if (REGION_is_acc(wn)) {
     if ( Is_region_with_pragma(wn,WN_PRAGMA_ACC_LOOP_BEGIN) )
       Push_acc_type(ACC_LOOP);
-    else
-      Push_acc_type(ACC_REGION);
+    else if ( Is_region_with_pragma(wn,WN_PRAGMA_ACC_DATA_BEGIN) )
+      Push_acc_type(ACC_DATAREGION);
+    else//Parallel/kernels ...
+      Push_acc_type(ACC_OFFREGION);
     Push_acc_rid(rid);
   }
 
@@ -2704,6 +2721,7 @@ CFG::Add_one_region( WN *wn, END_BLOCK *ends_bb )
     Pop_mp_type();
     Pop_mp_rid();
   }
+  //by daniel tian, for OpenACC
   else if (REGION_is_acc(wn)) {
     // add an empty region exit block for MP regions
     if (_current_bb->Kind() != BB_REGIONEXIT)
@@ -3756,7 +3774,7 @@ CFG::Ident_mp_acc_regions(void)
   Clear_mp_rid();
   Clear_bb_region();
 
-  // assuming all MP region has single entry and exit bb
+  // assuming all MP/ACC region has single entry and exit bb
   FOR_ALL_NODE( bb, cfg_iter, Init() ) {
     if (bb->Kind() == BB_REGIONSTART) {
       bb_region = bb->Regioninfo();
@@ -3767,7 +3785,18 @@ CFG::Ident_mp_acc_regions(void)
 	Push_bb_region(bb_region);
       }
       else if (RID_TYPE_acc(bb_region->Rid())) {
-	Push_acc_type(ACC_REGION);
+	//if this is a region start node, it must include the region type pragma, like acc data/data kernels/acc parallel/...
+	WN* wn_pragma = bb->Firststmt();	
+    Is_True(wn_pragma != NULL, ("CFG::Ident_mp_acc_regions, no wn pragma identification node"));
+	if (WN_operator(wn_pragma) == OPR_PRAGMA &&
+        (WN_pragma(wn_pragma) == WN_PRAGMA_ACC_LOOP_BEGIN))
+      Push_acc_type(ACC_LOOP);
+	else if (WN_operator(wn_pragma) == OPR_PRAGMA &&
+        (WN_pragma(wn_pragma) == WN_PRAGMA_ACC_DATA_BEGIN))
+      Push_acc_type(ACC_DATAREGION);
+    else//Parallel/kernels ...
+      Push_acc_type(ACC_OFFREGION);
+	//Push_acc_type(ACC_REGION);
 	Push_acc_rid(bb_region->Rid());
 	Push_bb_region(bb_region);
       }
@@ -3776,6 +3805,12 @@ CFG::Ident_mp_acc_regions(void)
     if (! NULL_mp_type()) { // stack not empty
       bb->Set_MP_region();
       bb->Set_rid_id(RID_id(Top_mp_rid()));
+    }
+    if (!NULL_acc_type()) { // stack not empty
+      bb->Set_ACC_region();	//may be it is data region which still run in CPU side.
+	   if(Is_ACC_Offload_Region())
+      	bb->Set_ACC_offload_region();
+      bb->Set_rid_id(RID_id(Top_acc_rid()));
     }
 
     // an MP region has a BB_REGIONEXIT even though it has no OPC_REGION_EXIT
@@ -5873,6 +5908,23 @@ CFG::Find_enclosing_parallel_region_bb( BB_NODE *bb)
     }
   }
   // didn't find it
+  return NULL;
+}
+
+
+//For OpenACC Region, by Daniel Tian
+BB_NODE*
+CFG::Find_enclosing_acc_offload_region_bb( BB_NODE *bb)
+{
+	BB_NODE* bb_parent = NULL;
+	if(bb_parent=Find_enclosing_region_bb(bb, WN_PRAGMA_ACC_PARALLEL_BEGIN))
+		return bb_parent;
+	else if(bb_parent=Find_enclosing_region_bb(bb, WN_PRAGMA_ACC_KERNELS_BEGIN))
+		return bb_parent;
+	else 
+		bb_parent=Find_enclosing_region_bb(bb, WN_PRAGMA_ACC_LOOP_BEGIN);
+	return bb_parent;
+	
   return NULL;
 }
 

@@ -4168,7 +4168,7 @@ STMTREP::Enter_lhs(CODEMAP *htable, OPT_STAB *opt_stab, COPYPROP *copyprop)
     }
     if (htable->Phase() != MAINOPT_PHASE && PU_has_acc(Get_Current_PU())) {
       BOOL is_acc_offload = FALSE;
-      if (Bb()->ACC_region()) {
+      if (Bb()->ACC_offload_region()) {
 	BB_NODE *regionbb = Bb();
 	if (regionbb->Kind() == BB_REGIONSTART) 
 	  is_acc_offload = Is_Symbol_In_ACC_offload_region(regionbb, opt_stab, Lhs()->Aux_id());

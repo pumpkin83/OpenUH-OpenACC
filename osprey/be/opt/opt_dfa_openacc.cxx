@@ -825,8 +825,8 @@ void dfa_def_use_info_bb_openacc(BB_NODE *bb)
 		else
 			update_tables_from_other_stmt(wn_stmt);
 		//fdump_tree()
-		if(bbid == 11)
-			fdump_tree(stdout, wn_iter.Cur());	
+		//if(bbid == 11)
+		//fdump_tree(stdout, wn_iter.Cur());	
 	}
 	
     // allocate bit vectors for GEN, KILL, IN, and OUT sets
@@ -836,10 +836,10 @@ void dfa_def_use_info_bb_openacc(BB_NODE *bb)
 	padding_bitvector_if_necessary(bbid, acc_total_num_vars);
 	//Generate Local Information
 	initialize_bb_dfa_localInfo(bb);
-    /*fprintf(curr_output_fp, "GEN: ");
-	print_sets(&acc_dataflow_info[bbid]->gen);
-       fprintf(curr_output_fp, "KILL: ");
-	print_sets(&acc_dataflow_info[bbid]->kill);*/
+    //fprintf(curr_output_fp, "GEN: ");
+	//print_sets(&acc_dataflow_info[bbid]->gen);
+    //   fprintf(curr_output_fp, "KILL: ");
+	//print_sets(&acc_dataflow_info[bbid]->kill);
 }
 
 void dfa_scan_all_var_st(WN* entry)
@@ -1319,7 +1319,7 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 		}
 	}
 	//////////////////////////////////////////////////////////////////////
-	FOR_ALL_ELEM (bb, cfg_iter, Init(cfg)) 
+	/*FOR_ALL_ELEM (bb, cfg_iter, Init(cfg)) 
 	{
 		bbid = bb->Id();
 		pBB_Info = acc_dataflow_info[bbid];
@@ -1340,7 +1340,7 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 	    // GEN 
 	    fprintf(curr_output_fp, "Gen: ");
 		print_sets(&acc_dataflow_info[bbid]->gen);
-	}
+	}*/
 	//////////////////////////////////////////////////////////////////////////	
 	for(i=0; i<acc_total_num_vars; i++)
 	{
@@ -1567,13 +1567,13 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 		BB_DATAFLOW_INFO_T* pEndBB_Info = acc_dataflow_info[iend_bbid];
 		///////////////////////////////////////////////////////////////////////////////////
 	    // In in start region
-	    fprintf(curr_output_fp, "IN: ");
-		print_sets(&acc_dataflow_info[istart_bbid]->in);	
+	    //fprintf(curr_output_fp, "IN: ");
+		//print_sets(&acc_dataflow_info[istart_bbid]->in);	
 	    // Out in end region
-	    fprintf(curr_output_fp, "OUT: ");
-		print_sets(&acc_dataflow_info[iend_bbid]->out);
-	    fprintf(curr_output_fp, "USED: ");
-		print_sets(&pRegionInfo->used);
+	    //fprintf(curr_output_fp, "OUT: ");
+		//print_sets(&acc_dataflow_info[iend_bbid]->out);
+	    //fprintf(curr_output_fp, "USED: ");
+		//print_sets(&pRegionInfo->used);
 		///////////////////////////////////////////////////////////////////////////////////
 		//Now need IN set from start BB, and OUT set from End BB
 		vector<bool>* pBitvectorIN = &pStartBB_Info->in;
@@ -1581,10 +1581,10 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 		//filter out all the unused data in IN/OUT sets. The unused var maybe used the succ nodes, so they appear in both IN/OUT.
 		vector<bool> filterIN = dfa_and_operation_bitvector(pBitvectorIN, &pRegionInfo->used);
 		vector<bool> filterOUT = dfa_and_operation_bitvector(pBitvectorOUT, &pRegionInfo->used);
-	    fprintf(curr_output_fp, "filterIN: ");
-		print_sets(&filterIN);
-	    fprintf(curr_output_fp, "filterOUT: ");
-		print_sets(&filterOUT);
+	    //fprintf(curr_output_fp, "filterIN: ");
+		//print_sets(&filterIN);
+	    //fprintf(curr_output_fp, "filterOUT: ");
+		//print_sets(&filterOUT);
 		/////////////////////////////////////////////////////////////
 		vector<bool> tmpResults1 = dfa_not_operation_bitvector(&pRegionInfo->array_pointer);
 		vector<bool> tmpResults2;

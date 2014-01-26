@@ -1096,6 +1096,12 @@ COPYPROP::Prop_var(CODEREP *x, BB_NODE *curbb, BOOL icopy_phase,
     return retv;
   }
 
+  //DON'T DO copy propogation in offload region. 
+  //Because this may make conflict between OpenACC liveness analysis and pragma declaraction by users.
+  //only the const replacement is allowed.
+  if (curbb->ACC_offload_region()) 
+  	return NULL;
+
   if (x->Is_flag_set((CR_FLAG)(CF_DEF_BY_PHI|CF_DEF_BY_CHI)) )
     return NULL;
 

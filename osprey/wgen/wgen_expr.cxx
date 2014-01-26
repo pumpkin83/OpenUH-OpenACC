@@ -9007,11 +9007,15 @@ WGEN_Expand_Expr (gs_t exp,
 	                else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8SIN;
 	                else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sin'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4SIN;
+	                else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8SIN;
+	                else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sin'");
+				}				 
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4SIN;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8SIN;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sin'");
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
 				
                 break;
 
@@ -9042,11 +9046,15 @@ WGEN_Expand_Expr (gs_t exp,
 	                else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8COS;
 	                else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cos'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4COS;
+	                else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8COS;
+	                else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cos'");
+				}	
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4COS;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8COS;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cos'");
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
 				
                 break;
 
@@ -9061,12 +9069,18 @@ WGEN_Expand_Expr (gs_t exp,
 			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ACOS;
 			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
 			}
+			else if(g_bOpenACCS2S_flag)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4ACOS;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8ACOS;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
+			}
 			else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ACOS;
 			else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ACOS;
 			else Fail_FmtAssertion ("unexpected mtype for intrinsic 'acos'");
 			intrinsic_op = TRUE;
-			if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-				intrinsic_op = FALSE;
+			//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+			//	intrinsic_op = FALSE;
 			
 		  	
 		}
@@ -9076,18 +9090,24 @@ WGEN_Expand_Expr (gs_t exp,
               case GSBI_BUILT_IN_ASINF:
 		if (ret_mtype == MTYPE_V) ret_mtype = MTYPE_F8;
 		if (! gs_flag_errno_math(program)) {  // Bug 14262
-		  	if(g_bOffloadRegion)
+		 	if(g_bOffloadRegion)
 			{
 				if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4ASIN;
 			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ASIN;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'asin'");
+			}
+			else if(g_bOpenACCS2S_flag)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4ASIN;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8ASIN;
 			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'asin'");
 			}
 		  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ASIN;
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ASIN;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'asin'");
 		  intrinsic_op = TRUE;
-		  if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-			intrinsic_op = FALSE;
+		  //if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+			//intrinsic_op = FALSE;
 		}
                 break;
 
@@ -9098,6 +9118,12 @@ WGEN_Expand_Expr (gs_t exp,
 				{
 					if (ret_mtype == MTYPE_F4) iopc = INTRN_CUDA_F4ATAN;
 				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ATAN;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan'");
+				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4ATAN;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8ATAN;
 				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan'");
 				}
 		  		else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ATAN;
@@ -9117,12 +9143,18 @@ WGEN_Expand_Expr (gs_t exp,
 				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8ATAN2;
 				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan2'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4ATAN2;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8ATAN2;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan2'");
+				}
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4ATAN2;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8ATAN2;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'atan2'");
                 intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 				
                 break;
 
@@ -9135,12 +9167,18 @@ WGEN_Expand_Expr (gs_t exp,
 				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8SINH;
 				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sinh'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4SINH;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8SINH;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sinh'");
+				}
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4SINH;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8SINH;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'sinh'");
                 intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 				
                 break;
 
@@ -9153,12 +9191,18 @@ WGEN_Expand_Expr (gs_t exp,
 				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8COSH;
 				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cosh'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4COSH;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8COSH;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cosh'");
+				}
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4COSH;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8COSH;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'cosh'");
                 intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 				
 		  	
                 break;
@@ -9172,12 +9216,18 @@ WGEN_Expand_Expr (gs_t exp,
 				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8TANH;
 				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'tanh'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+					if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4TANH;
+				    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8TANH;
+				    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'tanh'");
+				}
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4TANH;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8TANH;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'tanh'");
                 intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 				
 		  	
                 break;
@@ -9192,12 +9242,18 @@ WGEN_Expand_Expr (gs_t exp,
 			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8LOG10;
 			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log10'");
 			}
+			else if(g_bOpenACCS2S_flag)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4LOG10;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8LOG10;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log10'");
+			}
 		  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4LOG10;
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8LOG10;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log10'");
 		  intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 		}
 		  	
                 break;
@@ -9213,12 +9269,18 @@ WGEN_Expand_Expr (gs_t exp,
 		    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8LOG;
 		    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log'");
 		  }
+			else if(g_bOpenACCS2S_flag)
+			{
+				if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4LOG;
+			    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8LOG;
+			    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log'");
+			}
 		  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4LOG;
 		  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8LOG;
 		  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'log'");
 		  intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 		}
 		  	
                 break;
@@ -9237,12 +9299,18 @@ WGEN_Expand_Expr (gs_t exp,
 				  else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8EXP;
 				  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'exp'");
 				}
+				else if(g_bOpenACCS2S_flag)
+				{
+				  if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4EXP;
+				  else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8EXP;
+				  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'exp'");
+				}
                 else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4EXP;
                 else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8EXP;
                 else Fail_FmtAssertion ("unexpected mtype for intrinsic 'exp'");
 				intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 		  	
                 break;
 
@@ -9265,12 +9333,18 @@ WGEN_Expand_Expr (gs_t exp,
 						    else if (ret_mtype == MTYPE_F8) iopc = INTRN_CUDA_F8EXPEXPR;
 						    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'pow'");
 						  }
+							else if(g_bOpenACCS2S_flag)
+							{
+								if (ret_mtype == MTYPE_F4) iopc = INTRN_S2S_F4EXPEXPR;
+							    else if (ret_mtype == MTYPE_F8) iopc = INTRN_S2S_F8EXPEXPR;
+							    else Fail_FmtAssertion ("unexpected mtype for intrinsic 'pow'");
+							}
 		                  else if (ret_mtype == MTYPE_F4) iopc = INTRN_F4EXPEXPR;
 		                  else if (ret_mtype == MTYPE_F8) iopc = INTRN_F8EXPEXPR;
 				  else Fail_FmtAssertion ("unexpected mtype for intrinsic 'pow'");
 				  intrinsic_op = TRUE;
-				if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
-					intrinsic_op = FALSE;
+				//if(!g_bOffloadRegion && g_bOpenACCS2S_flag)
+				//	intrinsic_op = FALSE;
 				}
 		  	
 				break;

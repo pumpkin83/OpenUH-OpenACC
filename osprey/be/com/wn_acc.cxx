@@ -6324,6 +6324,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 		WN* wn_thenblock = WN_CreateBlock();
 		WN* wn_elseblock = WN_CreateBlock();
 		
+		UINT32 copyoutCount = 0;
 		itor_offload_info = acc_offload_scalar_management_tab.begin();
 		for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
 		{
@@ -6345,10 +6346,14 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 									wn_scalar_ptr, Init0);
 				
 				WN_INSERT_BlockLast(wn_thenblock, Init0);
+				copyoutCount ++;
 			}
 		}
-		WN* wn_scalar_out = WN_CreateIf(wn_If_stmt_test, wn_thenblock, WN_CreateBlock());
-		WN_INSERT_BlockLast(IndexGenerationBlock, wn_scalar_out);
+		if(copyoutCount != 0)
+		{
+			WN* wn_scalar_out = WN_CreateIf(wn_If_stmt_test, wn_thenblock, WN_CreateBlock());
+			WN_INSERT_BlockLast(IndexGenerationBlock, wn_scalar_out);
+		}
 	}
    	WN_INSERT_BlockLast ( acc_parallel_func, IndexGenerationBlock );
 	/* Transfer any mappings for nodes moved from parent to parallel function */
@@ -8209,6 +8214,7 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 		WN* wn_elseblock = WN_CreateBlock();
 		
 		itor_offload_info = acc_offload_scalar_management_tab.begin();
+		UINT32 copyoutCount = 0;
 		for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
 		{
 			ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
@@ -8229,10 +8235,14 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 									wn_scalar_ptr, Init0);
 				
 				WN_INSERT_BlockLast(wn_thenblock, Init0);
+				copyoutCount ++;
 			}
 		}
-		WN* wn_scalar_out = WN_CreateIf(wn_If_stmt_test, wn_thenblock, WN_CreateBlock());
-		WN_INSERT_BlockLast(wn_parallelBlock, wn_scalar_out);
+		if(copyoutCount != 0)
+		{
+			WN* wn_scalar_out = WN_CreateIf(wn_If_stmt_test, wn_thenblock, WN_CreateBlock());
+			WN_INSERT_BlockLast(wn_parallelBlock, wn_scalar_out);
+		}
 	}
 	/*********************************************************************/
 	ACC_Walk_and_Localize(wn_parallelBlock);
