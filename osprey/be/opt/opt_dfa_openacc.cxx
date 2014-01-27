@@ -843,17 +843,9 @@ void dfa_def_use_info_bb_openacc(BB_NODE *bb)
 	if(isize_test3 != acc_total_num_vars)
 	{	
 		printf("Error1\n");
-	}
+	}*/
 	//Generate Local Information
 	initialize_bb_dfa_localInfo(bb);
-	isize_test1 = info->gen.size(); 
-	isize_test2 = info->kill.size();
-	isize_test3 = info->in.size();
-	isize_test4 = info->out.size();
-	if(isize_test3 != acc_total_num_vars)
-	{	
-		printf("Error2\n");
-	}*/
     //fprintf(curr_output_fp, "GEN: ");
 	//print_sets(&acc_dataflow_info[bbid]->gen);
     //   fprintf(curr_output_fp, "KILL: ");
