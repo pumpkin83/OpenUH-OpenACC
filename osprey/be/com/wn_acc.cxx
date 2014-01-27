@@ -5211,7 +5211,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   WN* IteratorIndexInit = WN_Stid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index), IteratorIndexOpLhs2);
 	   //WN_INSERT_BlockFirst ( acc_stmt_block,  IteratorIndex);
 	   
-	   IndexGenerationBlock = WN_CreateBlock ();	
+	   //IndexGenerationBlock = WN_CreateBlock ();	
 	   WN_INSERT_BlockLast( IndexGenerationBlock,  IteratorIndexOp);
 	   //WN_INSERT_BlockLast( IndexGenerationBlock,  IteratorIndexInit);
 	   
@@ -5298,7 +5298,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   ACC_LOOP_TYPE OuterType = acc_loopinfo.acc_forloop[0].looptype;
 	   ACC_LOOP_TYPE InnerType = acc_loopinfo.acc_forloop[1].looptype;
 
-	   IndexGenerationBlock = WN_CreateBlock ();
+	   //IndexGenerationBlock = WN_CreateBlock ();
 	   
 		WN* wn_InnerIndex = WN_Ldid(TY_mtype(ST_type(st_InnerIndex)), 
 								0, st_InnerIndex, ST_type(st_InnerIndex));
@@ -5675,7 +5675,7 @@ ACC_Transform_MultiForLoop(KernelsRegionInfo* pKRInfo)
 	   ACC_LOOP_TYPE MidType = acc_loopinfo.acc_forloop[1].looptype;
 	   ACC_LOOP_TYPE InnerType = acc_loopinfo.acc_forloop[2].looptype;
 
-	   IndexGenerationBlock = WN_CreateBlock ();
+	   //IndexGenerationBlock = WN_CreateBlock ();
 	   
 		WN* wn_InnerIndex = WN_Ldid(TY_mtype(ST_type(st_InnerIndex)), 
 								0, st_InnerIndex, ST_type(st_InnerIndex));

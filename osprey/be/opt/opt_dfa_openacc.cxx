@@ -205,6 +205,7 @@ static map<INT32, BB_DATAFLOW_INFO_T*>  acc_dataflow_info;
 typedef struct BB_DATAFLOW_ACC_REGION_INFO
 {
     vector<bool> used;
+    vector<bool> changed;
     vector<bool> scalar_private;
     vector<bool> parameters;
     vector<bool> first_private;	//in
@@ -1438,6 +1439,7 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 			for(INT32 bit_index = 0; bit_index < acc_total_num_vars; bit_index++)
 			{
 				pRegionInfo->used.push_back(FALSE);
+				pRegionInfo->changed.push_back(FALSE);
 				pRegionInfo->scalar_private.push_back(FALSE);
 				pRegionInfo->parameters.push_back(FALSE);
 				pRegionInfo->first_private.push_back(FALSE);
@@ -1453,7 +1455,6 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 				{
 		            case OPR_LDID:
 					case OPR_LDA:
-			        case OPR_STID:
 		                used_var = WN_st(wn);
 						if(dfa_scan_is_uncounted_var(used_var))
 							break;
@@ -1461,6 +1462,14 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 						pRegionInfo->used[bitvector_index] = TRUE;
 		                //add_use(wn_stmt, used_var);
 		                break;
+			        case OPR_STID:
+		                used_var = WN_st(wn);
+						if(dfa_scan_is_uncounted_var(used_var))
+							break;
+						bitvector_index = acc_vars[used_var];
+						pRegionInfo->used[bitvector_index] = TRUE;
+						pRegionInfo->changed[bitvector_index] = TRUE;
+						break;
 		        }				
 				tree_iter ++;
 			}
@@ -1581,6 +1590,8 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 		//filter out all the unused data in IN/OUT sets. The unused var maybe used the succ nodes, so they appear in both IN/OUT.
 		vector<bool> filterIN = dfa_and_operation_bitvector(pBitvectorIN, &pRegionInfo->used);
 		vector<bool> filterOUT = dfa_and_operation_bitvector(pBitvectorOUT, &pRegionInfo->used);
+		//if the data is not changed in this offload region, ignore. 
+		filterOUT = dfa_and_operation_bitvector(&filterOUT, &pRegionInfo->changed);
 	    //fprintf(curr_output_fp, "filterIN: ");
 		//print_sets(&filterIN);
 	    //fprintf(curr_output_fp, "filterOUT: ");
