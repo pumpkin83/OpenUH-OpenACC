@@ -286,6 +286,7 @@ void free_dfa_resource_openacc()
 	//acc_label_bbid.clear();	// region exit belongs to which bbid
     //acc_start_end_bbid.clear();
 	acc_used_data_classify.clear();
+	acc_dataflow_info.clear();
     // delete WN maps
     WN_MAP_Delete(WDFA_Def_Map);
     WN_MAP_Delete(WDFA_MayDefs_Map);
@@ -660,11 +661,11 @@ static void padding_bitvector_if_necessary(INT32 bb_id, INT32 cur_bit_pos)
 {
 	BB_DATAFLOW_INFO_T *bb_info = acc_dataflow_info[bb_id];
 	INT32 cur_size = bb_info->gen.size();
-	if(cur_size >= (cur_bit_pos+1))
+	if(cur_size >= (cur_bit_pos))
 		return;
-	else if(cur_size < (cur_bit_pos+1))
+	else if(cur_size < (cur_bit_pos))
 	{
-		for(INT32 bit_index = cur_size; bit_index < (cur_bit_pos+1); bit_index++)
+		for(INT32 bit_index = cur_size; bit_index < (cur_bit_pos); bit_index++)
 		{
 			bb_info->gen.push_back(FALSE);
 			bb_info->kill.push_back(FALSE);
@@ -835,8 +836,24 @@ void dfa_def_use_info_bb_openacc(BB_NODE *bb)
     BB_DATAFLOW_INFO_T *info = acc_dataflow_info[bbid];
 	
 	padding_bitvector_if_necessary(bbid, acc_total_num_vars);
+	/*UINT32 isize_test1 = info->gen.size(); 
+	UINT32 isize_test2 = info->kill.size();
+	UINT32 isize_test3 = info->in.size();
+	UINT32 isize_test4 = info->out.size();
+	if(isize_test3 != acc_total_num_vars)
+	{	
+		printf("Error1\n");
+	}
 	//Generate Local Information
 	initialize_bb_dfa_localInfo(bb);
+	isize_test1 = info->gen.size(); 
+	isize_test2 = info->kill.size();
+	isize_test3 = info->in.size();
+	isize_test4 = info->out.size();
+	if(isize_test3 != acc_total_num_vars)
+	{	
+		printf("Error2\n");
+	}*/
     //fprintf(curr_output_fp, "GEN: ");
 	//print_sets(&acc_dataflow_info[bbid]->gen);
     //   fprintf(curr_output_fp, "KILL: ");
@@ -995,9 +1012,14 @@ static vector<bool> dfa_or_operation_bitvector(vector<bool>* pbitvector1,
 {
 	UINT32 i;
 	vector<bool> bv_results = *pbitvector1;
+	UINT32 isize1= pbitvector1->size();
+	UINT32 isize2= pbitvector2->size();
 	for(i=0; i<pbitvector1->size(); i++)
 	{
-		bv_results[i] = (*pbitvector1)[i] | (*pbitvector2)[i] ;
+		bool bt1 = (*pbitvector1)[i];
+		bool bt2 = (*pbitvector2)[i];
+		bool bt3 = bt1 | bt2;
+		bv_results[i] =  bt3;
 	}
 	return bv_results;	
 }
@@ -1282,7 +1304,22 @@ static void DFA_Create_acc_inout_varlist(vector<bool>* pBitvector, WN* wn_replac
 }
 
 
-
+void Print_local_info(UINT32 bbid)
+{
+	
+		BB_DATAFLOW_INFO_T*  pBB_Info = acc_dataflow_info[bbid];
+		if(pBB_Info != NULL)
+		{
+			UINT32 isize_test1 = pBB_Info->gen.size(); 
+			UINT32 isize_test2 = pBB_Info->kill.size();
+			UINT32 isize_test3 = pBB_Info->in.size();
+			UINT32 isize_test4 = pBB_Info->out.size();
+			if(isize_test3 != acc_total_num_vars)
+			{	
+				printf("Error3\n");
+			}
+		}
+}
 //=========================================================================
 //
 // Function: Perform_Global_DFA
@@ -1308,7 +1345,8 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 	//There is some bbs which haven't created bb info yet.
 	CFG_ITER cfg_iter;
 	///////////////////////////////////////////////////////////////////////
-	FOR_ALL_ELEM (bb, cfg_iter, Init(cfg)) 
+	//FOR_ALL_ELEM (bb, cfg_iter, Init(cfg)) 
+	FOR_ALL_ELEM (bb, dfs_iter, Init())
 	{
 		bbid = bb->Id();
 		pBB_Info = acc_dataflow_info[bbid];
@@ -1318,6 +1356,7 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 		    pBB_Info = acc_dataflow_info[bbid];			
 			padding_bitvector_if_necessary(bbid, acc_total_num_vars);
 		}
+		//Print_local_info(bbid);
 	}
 	//////////////////////////////////////////////////////////////////////
 	/*FOR_ALL_ELEM (bb, cfg_iter, Init(cfg)) 
@@ -1420,7 +1459,7 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 	FOR_ALL_ELEM (bb, dfs_iter, Init())
 	{	
 		WN* wn_region  = bb->Firststmt();
-		if((bb->Kind() == BB_REGIONSTART)
+		if((bb->Kind() == BB_REGIONSTART && bb->Firststmt())
 			&& (WN_opcode(bb->Firststmt()) == OPC_REGION)
 			&& ((WN_pragma(WN_first(WN_region_pragmas(wn_region)))==WN_PRAGMA_ACC_KERNELS_BEGIN)
 			|| (WN_pragma(WN_first(WN_region_pragmas(wn_region)))==WN_PRAGMA_ACC_PARALLEL_BEGIN)))
