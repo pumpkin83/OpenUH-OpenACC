@@ -1650,6 +1650,8 @@ static void STD_Canonicalize_Upper_Bound(WN* wn_loop)
 {
   if (Do_Loop_Is_Mp(wn_loop))
     return; 
+  if (Do_Loop_Is_ACC(wn_loop))
+    return; 
   OPCODE opc = WN_opcode(WN_end(wn_loop)); 
   OPERATOR opr = OPCODE_operator(opc);
   if (UBvar(WN_end(wn_loop)) == NULL)
