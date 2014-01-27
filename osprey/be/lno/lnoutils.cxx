@@ -3995,6 +3995,37 @@ extern BOOL Do_Loop_Is_Mp(WN *wn)
   return FALSE; 
 }
 
+
+static WN * Get_Enclosing_Region_node(WN *wn)
+{
+  Is_True(wn!=NULL,("Get_Enclosing_Region_ID: Null wn pointer"));
+  WN *pwn = LWN_Get_Parent(wn);
+  while (pwn && WN_operator(pwn) != OPR_REGION &&
+         WN_operator(pwn) != OPR_FUNC_ENTRY)
+    pwn = LWN_Get_Parent(pwn);
+  return pwn;
+}
+
+
+extern BOOL Is_ACC_Offloaded_Region(WN *wn)
+{
+	WN* wn_region = Get_Enclosing_Region_node(wn);
+	if(wn_region)
+	{
+	  if (!Is_ACC_Region(wn_region))
+	    return FALSE; 
+	  WN* wn_pragma = WN_first(WN_region_pragmas(wn_region));  
+	  if (wn_pragma == NULL)
+	    return FALSE;
+	  if (LWN_Get_Parent(wn) == NULL)
+	    return FALSE;
+	  if (WN_opcode(wn_pragma) == OPC_PRAGMA 
+	    && (WN_pragma(wn_pragma) != WN_PRAGMA_ACC_DATA_BEGIN))
+	    return TRUE; 
+	}
+  return FALSE; 
+}
+
 extern BOOL Do_Loop_Is_ACC(WN *wn)
 {
   if (LWN_Get_Parent(wn) == NULL)

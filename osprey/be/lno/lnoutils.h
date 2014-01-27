@@ -850,6 +850,7 @@ extern BOOL Is_Mp_Region(WN *wn);
 //by daniel tian, for OpenACC
 extern BOOL Is_ACC_Region(WN *wn);
 extern BOOL Do_Loop_Is_ACC(WN *wn);
+extern BOOL Is_ACC_Offloaded_Region(WN *wn);
 #ifdef KEY
 extern BOOL Is_Eh_Or_Try_Region(WN *wn);
 #endif

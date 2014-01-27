@@ -1404,7 +1404,9 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
 	    done_first_pu = TRUE;
 	}
     }
-	
+	//if both isOpenACCRegion and hasOpenACCRegion is true
+	//it means this function is offloaded accelerator kernel function.
+	//if only hasOpenACCRegion is true, it means this is general function which includes acc regions.
   BOOL isOpenACCRegion = PU_acc(Get_Current_PU());
   BOOL hasOpenACCRegion = PU_has_acc(Get_Current_PU());
   
@@ -1492,7 +1494,8 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
 	if (! (WN_operator(pu) == OPR_FUNC_ENTRY && 
 	       ST_asm_function_st(*WN_st(pu)))) 
 #endif
-	pu = LNO_Processing (current_pu, pu);/* make -O0, -O1, -O2 a bit faster*/
+	if(!isOpenACCRegion)
+		pu = LNO_Processing (current_pu, pu);/* make -O0, -O1, -O2 a bit faster*/
 #ifndef KEY 
 	// Bug 7283 - the following code cannot handle the case where multiple
 	// fields of struct are used in a region. Only the field pointed to by
