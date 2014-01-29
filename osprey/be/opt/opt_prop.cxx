@@ -1077,6 +1077,9 @@ COPYPROP::Prop_var(CODEREP *x, BB_NODE *curbb, BOOL icopy_phase,
   CODEREP *expr;
   MTYPE    expr_ty;
 
+  //if it is just liveness analysis for OpenACC, no propagation
+  if(OPT_Enable_OpenACC_Liveness_Analysis)
+  	return NULL;
   // is this variable a constant initialized scalar?
 
   if (x->Is_var_volatile()) return NULL;
