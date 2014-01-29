@@ -130,6 +130,8 @@ boolean Float_Point_Support = FALSE;
 #endif
 boolean compiling_acc = FALSE;
 boolean compiling_acc_s2s = FALSE;
+boolean compiling_cuda = FALSE; //if it is true, uhcc will call nvcc to compile the cuda into ptx code
+char* nvcc_cmd = NULL;
 
 extern void turn_down_opt_level (int new_olevel, char *msg);
 
@@ -1451,6 +1453,50 @@ add_file_args (string_list_t *args, phases_t index)
 		    append_string_lists (args, ipl_cmds);
 		}
 		break; 
+	case P_nvcc:	
+		if(nvcc_cmd != NULL)
+		{
+			temp = nvcc_cmd;
+			while(temp)
+			{
+				char* newloc = strchr(temp, ',');
+				if(newloc)
+				{
+					*newloc = '\0';
+					newloc ++;
+				}	
+				sprintf (buf, "%s", temp);
+				temp = newloc;
+				add_string(args, buf);
+			}
+		}
+		add_string(args, "-ptx");
+		{
+			char* pname = strdup(the_file);
+			//char *cp = strdup(pname) + strlen(pname);
+			int index;
+
+			//while (cp != pname) {
+			//if (*cp == '/') return cp+1;
+			//--cp;
+			//}
+			//if (*cp == '/') return cp+1;
+			//temp = cp;
+			for ( index=strlen(pname)-1; index>=0; index-- ) 
+			{
+			    if ( pname[index] == '/' ) break;	/* Don't touch directory prefixes */
+			    if ( pname[index] == '.' ) 
+				{
+			      pname[index] = 0;
+			      break;
+			    }
+		  	}
+			temp = pname;
+		}
+		//temp = strcat(temp,"w2c.cu");
+		sprintf (buf, "%s.w2c.cu", temp);
+		add_string(args, buf);
+		break;
 	case P_be:
 #if defined(TARG_NVISA)
 	case P_bec:
@@ -2092,6 +2138,11 @@ add_final_ld_args (string_list_t *args, phases_t ld_phase)
                   add_string(args, "-lrt");
                 }
                 add_string(args, "-lstdc++");
+		if (option_was_seen(O_acc) ||
+				option_was_seen(O_fopenacc)) 
+			{
+				add_string(args, "-lopenacc");
+			}
             }
 
             if (option_was_seen (O_fprofile_arcs))
@@ -3381,6 +3432,7 @@ run_compiler (int argc, char *argv[])
 {
 	int i;
 	string_list_t *args;
+	string_list_t *nvcc_args;
 	boolean inst_info_updated = FALSE;
 	boolean cmd_line_updated = FALSE;
         buffer_t rii_file_name;
@@ -3464,6 +3516,14 @@ run_compiler (int argc, char *argv[])
 #endif
 			run_phase (phase_order[i],
 				   get_full_phase_name(phase_order[i]), args);
+			//check if it is necessary to run CUDA files
+			if(compiling_cuda == TRUE && phase_order[i] == P_be)
+			{
+				nvcc_args = init_string_list();
+				add_file_args (nvcc_args, P_nvcc);
+				run_phase (P_nvcc,
+				   get_full_phase_name(P_nvcc), nvcc_args);
+			}
                         /* undefine the environment variable
                          * DEPENDENCIES_OUTPUT after the pre-processor phase -
                          * bug 386.

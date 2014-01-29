@@ -144,6 +144,9 @@ boolean Dragon_Flag;
 
 extern boolean compiling_acc;
 extern boolean compiling_acc_s2s;
+extern boolean compiling_cuda; //if it is true, uhcc will call nvcc to compile the cuda into ptx code
+extern char* nvcc_cmd;
+
 static void check_openacc_flags(int argc, char **argv)
 {
 	int i;
@@ -156,6 +159,14 @@ static void check_openacc_flags(int argc, char **argv)
 				compiling_acc = TRUE;
 			else if(!strcmp(argv[i], "-s2s"))
 				compiling_acc_s2s = TRUE;
+			else if(!strncmp(argv[i], "-nvcc", 5))
+			{
+				compiling_cuda = TRUE;
+					if(argv[i][5] == ',')
+						nvcc_cmd = argv[i] + 6;
+					else
+						nvcc_cmd = NULL;
+			}
 		}
     }
 }

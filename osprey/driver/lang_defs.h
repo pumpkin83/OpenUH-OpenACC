@@ -157,7 +157,7 @@ typedef enum {
 	P_library,
 	P_alt_library,	/* alternate library path */
 
-	//P_nvcc, 		/*translate the CUDA  into PTX code*/
+	P_nvcc, 		/*translate the CUDA  into PTX code*/
 	P_LAST
 } phases_t;
 
