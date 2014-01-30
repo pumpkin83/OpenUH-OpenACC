@@ -3470,6 +3470,19 @@ run_compiler (int argc, char *argv[])
 			/* reset source-lang to be invoked-lang for linking */
 			source_lang = get_source_lang(source_kind);
 			run_ld ();
+			//check if it is necessary to run CUDA files
+			if(compiling_cuda == TRUE)
+			{
+				if(!nvcc_path)					
+				{
+					fprintf(stderr, "NVIDIA CUDA compiler should be provided with -nvpath,PATH.\n");
+					nvcc_path = "";
+				}
+				char* full_path =concat_strings(nvcc_path, get_phase_name(P_nvcc));
+				nvcc_args = init_string_list();
+				add_file_args (nvcc_args, P_nvcc);
+				run_phase (P_nvcc, full_path, nvcc_args);
+			}
 			if (Gen_feedback)
 			   run_pixie ();
 		} else {
@@ -3517,19 +3530,6 @@ run_compiler (int argc, char *argv[])
 #endif
 			run_phase (phase_order[i],
 				   get_full_phase_name(phase_order[i]), args);
-			//check if it is necessary to run CUDA files
-			if(compiling_cuda == TRUE && phase_order[i] == P_be)
-			{
-				if(!nvcc_path)					
-				{
-					fprintf(stderr, "NVIDIA CUDA compiler should be provided with -nvpath,PATH.\n");
-					nvcc_path = "";
-				}
-				char* full_path =concat_strings(nvcc_path, get_phase_name(P_nvcc));
-				nvcc_args = init_string_list();
-				add_file_args (nvcc_args, P_nvcc);
-				run_phase (P_nvcc, full_path, nvcc_args);
-			}
                         /* undefine the environment variable
                          * DEPENDENCIES_OUTPUT after the pre-processor phase -
                          * bug 386.

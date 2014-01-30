@@ -274,6 +274,17 @@ main (int argc, char *argv[])
 		  i++;
 		  continue;
 		}
+		//they are for nvidia cuda compiler. ignore them.
+		else if(!strncmp(argv[i], "-nvcc", 5))
+		{	
+		  	i++;
+			continue;
+		}
+		else if(!strncmp(argv[i], "-nvpath", 7))
+		{
+			i++;
+		  	continue;
+		}
 
 		set_current_arg_pos(i);
 		if (argv[i][0] == '-' && !dashdash_flag) {
