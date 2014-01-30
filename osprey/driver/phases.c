@@ -132,6 +132,7 @@ boolean compiling_acc = FALSE;
 boolean compiling_acc_s2s = FALSE;
 boolean compiling_cuda = FALSE; //if it is true, uhcc will call nvcc to compile the cuda into ptx code
 char* nvcc_cmd = NULL;
+char* nvcc_path = NULL;
 
 extern void turn_down_opt_level (int new_olevel, char *msg);
 
@@ -3519,10 +3520,15 @@ run_compiler (int argc, char *argv[])
 			//check if it is necessary to run CUDA files
 			if(compiling_cuda == TRUE && phase_order[i] == P_be)
 			{
+				if(!nvcc_path)					
+				{
+					fprintf(stderr, "NVIDIA CUDA compiler should be provided with -nvpath,PATH.\n");
+					nvcc_path = "";
+				}
+				char* full_path =concat_strings(nvcc_path, get_phase_name(P_nvcc));
 				nvcc_args = init_string_list();
 				add_file_args (nvcc_args, P_nvcc);
-				run_phase (P_nvcc,
-				   get_full_phase_name(P_nvcc), nvcc_args);
+				run_phase (P_nvcc, full_path, nvcc_args);
 			}
                         /* undefine the environment variable
                          * DEPENDENCIES_OUTPUT after the pre-processor phase -

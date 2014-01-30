@@ -544,9 +544,7 @@ get_full_phase_name (phases_t index)
 {
 	buffer_t tmp;
 	strcpy(tmp, get_phase_dir(index));
-	//nvcc compiler doesn't need this '/'
-	if(index != P_nvcc)
-		strcat(tmp, "/");
+	strcat(tmp, "/");
 	return concat_strings (tmp, get_phase_name(index));
 }
 

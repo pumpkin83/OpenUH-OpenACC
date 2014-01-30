@@ -146,6 +146,7 @@ extern boolean compiling_acc;
 extern boolean compiling_acc_s2s;
 extern boolean compiling_cuda; //if it is true, uhcc will call nvcc to compile the cuda into ptx code
 extern char* nvcc_cmd;
+extern char* nvcc_path;
 
 static void check_openacc_flags(int argc, char **argv)
 {
@@ -167,6 +168,16 @@ static void check_openacc_flags(int argc, char **argv)
 					else
 						nvcc_cmd = NULL;
 			}
+			else if(!strncmp(argv[i], "-nvpath", 7))
+			{
+				if(argv[i][7] == ',')
+					nvcc_path = argv[i] + 8;
+				else
+				{
+					nvcc_path = NULL;
+					fprintf(stderr, "NVIDIA CUDA compiler should be provided with -nvccpath,PATH.\n");
+				}
+			}
 		}
     }
 }
@@ -186,7 +197,8 @@ main (int argc, char *argv[])
 	program_name = drop_path(argv[0]);	/* don't print path */
 	orig_program_name = string_copy(argv[0]);
         file_utils_set_program_name(orig_program_name);
-
+		
+	check_openacc_flags(argc, argv);
 	/* Add the contents of OPEN64_GENFLAGS to the command line */
 	#ifdef PSC_TO_OPEN64
 	append_open64_env_flags(&argc, &argv, "OPEN64_GENFLAGS");
@@ -197,7 +209,6 @@ main (int argc, char *argv[])
 	append_default_options(&argc, &argv);
 
 	save_command_line(argc, argv);		/* for prelinker    */	
-	check_openacc_flags(argc, argv);
 	
 	files = init_string_list();
 	file_suffixes = init_string_list();
