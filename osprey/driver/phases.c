@@ -2139,13 +2139,12 @@ add_final_ld_args (string_list_t *args, phases_t ld_phase)
                   add_string(args, "-lrt");
                 }
                 add_string(args, "-lstdc++");
-		if (option_was_seen(O_acc) ||
-				option_was_seen(O_fopenacc)) 
-			{
-				add_string(args, "-lopenacc");
-			}
             }
-
+	    if (option_was_seen(O_acc) ||
+			option_was_seen(O_fopenacc))
+	    {
+		add_string(args, "-lopenacc");
+	    }
             if (option_was_seen (O_fprofile_arcs))
                 add_string(args, "-lgcov");    // bug 12754
 	    if (option_was_seen(O_pthread) ||
