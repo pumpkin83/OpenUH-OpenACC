@@ -1091,7 +1091,7 @@ static void print_sets(vector<bool>* pBitvector)
             bits[i] = '0';
         }
     }
-    fprintf(curr_output_fp, " (%s)\n", bits);
+    //fprintf(curr_output_fp, " (%s)\n", bits);
 
     free(bits);
 }
