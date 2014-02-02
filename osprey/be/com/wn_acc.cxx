@@ -9437,6 +9437,7 @@ ACC_Walk_and_Localize (WN * tree)
     //for (w=vtab; w->orig_st; w++) 
 	{
 	  	ACC_VAR_TABLE newVar = itor->second;
+		new_sym = newVar.new_st;
 		//WN_num_dim
 		//WN_array_dim(x,i)
 		//WN_array_index(x, i)
