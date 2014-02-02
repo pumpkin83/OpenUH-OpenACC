@@ -1092,6 +1092,7 @@ static void print_sets(vector<bool>* pBitvector)
         }
     }
     //fprintf(curr_output_fp, " (%s)\n", bits);
+    fprintf(curr_output_fp, "\n");
 
     free(bits);
 }
@@ -1632,7 +1633,8 @@ void perform_global_dfa(CFG* cfg)//WDFA_TYPE wdfa_type)
 		vector<bool> tmpResults2;
 		pRegionInfo->parameters = dfa_or_operation_bitvector(&filterIN, &filterOUT);
 	    // print PARAMETER set
-	    fprintf(curr_output_fp, "PARAMETERS: ");
+		fprintf(curr_output_fp, "*****************************************************************\n");
+	    	fprintf(curr_output_fp, "PARAMETERS: ");
 		print_sets(&pRegionInfo->parameters);
 		//////////////////////////////////////////////////////////////////////////////////////
 		//Only get the scalar variable
