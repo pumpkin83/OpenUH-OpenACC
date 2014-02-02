@@ -11737,6 +11737,7 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	/*Copyout the data and clear the vectors and map buffer*/
 	ACC_Scalar_Variable_Copyout(kernelsBlock);
 	acc_offload_scalar_management_tab.clear();
+	acc_parms_nodes = NULL;
 	//acc_scalar_inout_nodes.clear();
 	//acc_scalar_out_nodes.clear();
 	//acc_map_scalar_inout.clear();
@@ -12083,6 +12084,7 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	/*Copyout the data and clear the vectors and map buffer*/
 	ACC_Scalar_Variable_Copyout(parallelBlock);
 	acc_offload_scalar_management_tab.clear();
+	acc_parms_nodes = NULL;
 	/****************************************************************************/
 	if(parallelRegionInfo.acc_present_or_copyout_nodes)
 		ACC_GenDataCopyOut(&parallelRegionInfo.pcopyoutMap, parallelBlock);
