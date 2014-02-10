@@ -2360,9 +2360,9 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				//create local				
 				new_st = New_ST( CURRENT_SYMTAB );
 				ST_Init(new_st,
-						Save_Str( ST_name(old_st)),
+						Save_Str2("_private_", ST_name(old_st)),
 						CLASS_VAR,
-						SCLASS_FORMAL,
+						SCLASS_AUTO,
 						EXPORT_LOCAL,
 						ty);
 				//Set_ST_is_value_parm( new_st );
@@ -4123,8 +4123,13 @@ static void ACC_Global_Shared_Memory_Reduction(WN* wn_replace_block)
 	   			
 	   			reductionMap.wn_initialAssign = wn_reduction_init;	
 				//////////////////////////////////////////////////////////////////////////////////
-				wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+				if(acc_reduction_mem == ACC_RD_GLOBAL_MEM)
+					wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
 									reductionMap.st_Inkernel);
+				else
+					wn_array_loc = ACC_LoadDeviceSharedArrayElem(WN_COPY_Tree(reductionMap.wn_IndexOpr),
+									 reductionMap.st_local_array);
+
 				wn_reduction_init = WN_Istore(TY_mtype(ty_red), 0, 
 									Make_Pointer_Type(ty_red), wn_array_loc, 
 									WN_COPY_Tree(reductionMap.wn_private_var));
@@ -4272,12 +4277,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	  WN* wn_index = WN_Ldid(TY_mtype(ST_type(st_index)), 0, st_index, ST_type(st_index));
 	  
 	  INT32 RDIdx = 0;
-	  while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
-      {
-		ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
-		WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
-		RDIdx ++;
-  	  }
+	  //while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+      //{
+	//	ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+	//	WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
+	//	RDIdx ++;
+  	  //}
 	  
    	  if(looptype == ACC_GANG_VECTOR || looptype ==ACC_NONE_SPECIFIED)
    	  {
@@ -4447,12 +4452,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 		WN* wn_OutterLoopbody = WN_CreateBlock ();
 		
 	    UINT32 RDIdx = 0;
-		while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
-		{
-			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
-			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
-			RDIdx ++;
-		}
+		//while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		//{
+		//	ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+		//	WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
+		//	RDIdx ++;
+		//}
 
 	   if(OuterType ==  ACC_GANG && InnerType == ACC_VECTOR)
 	   {
@@ -4762,12 +4767,12 @@ ACC_Transform_SingleForLoop(ParallelRegionInfo* pPRInfo, WN* wn_replace_block)
 	    /********************************************************************************/
 	    /********************************************************************************/
 		UINT32 RDIdx = 0;
-		while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
-		{
-			ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
-			WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
-			RDIdx ++;
-		}
+		//while(RDIdx < acc_loopinfo.acc_forloop[0].reductionmap.size())
+		//{
+	//		ACC_ReductionMap reductionMap = acc_loopinfo.acc_forloop[0].reductionmap[RDIdx];
+	//		WN_INSERT_BlockLast( IndexGenerationBlock,  reductionMap.wn_initialAssign);
+	//		RDIdx ++;
+	//	}
 	    /********************************************************************************/
 
 	   //this is the only combination
