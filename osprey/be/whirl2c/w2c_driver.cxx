@@ -1480,6 +1480,7 @@ W2C_Outfile_Translate_Pu(WN *pu, BOOL emit_global_decls)
    /* Make sure all necessary output files are open.
     */   
    isGPUKernelFunc = PU_acc(Get_Current_PU());
+   isGPUKernelFunc = isGPUKernelFunc || PU_acc_routine(Get_Current_PU());
    //if it is not GPU function and it is not in source2source solution, just return.
    if(!isGPUKernelFunc&&!b_OpenACCS2S)
    	{

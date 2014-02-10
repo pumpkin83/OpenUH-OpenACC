@@ -1046,6 +1046,13 @@ inline void
 Clear_PU_acc (PU& pu)			{ pu.flags &= ~PU_ACC; }
 
 inline BOOL
+PU_acc_routine (const PU& pu)			{ return (pu.flags & PU_ACC_ROUTINE) ? true: false; }
+inline void
+Set_PU_acc_routine (PU& pu)			{ pu.flags |= PU_ACC_ROUTINE; }
+inline void
+Clear_PU_acc_routine (PU& pu)			{ pu.flags &= ~PU_ACC_ROUTINE; }
+
+inline BOOL
 PU_is_task (const PU& pu)	{ return (pu.flags & PU_IS_TASK) != 0; }
 inline void
 Set_PU_is_task (PU& pu)		{ pu.flags |= PU_IS_TASK; }

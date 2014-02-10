@@ -1697,8 +1697,7 @@ Create_ST_For_Tree (gs_t decl_node)
 		if(flags1 && flags2) //Used by openACC. It means this function is a device function.
 		{
 			Set_ST_ACC_device_func(st);			
-			Set_PU_acc(pu);
-			Set_PU_has_acc(pu);
+			Set_PU_acc_routine(pu);
 		}
 		Set_ST_sfname_idx(st, Save_Str(gs_decl_source_file(decl_node)));
 
