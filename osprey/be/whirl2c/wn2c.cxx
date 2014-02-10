@@ -5740,6 +5740,7 @@ WN2C_func_entry(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
    ST **param_st;
    INT  param;
    isGPUKernelFunc = PU_acc(Get_Current_PU());
+   isGPUKernelFunc = isGPUKernelFunc || PU_acc_routine(Get_Current_PU());
    Is_True(WN_operator(wn) == OPR_FUNC_ENTRY, 
 	   ("Invalid opcode for WN2C_func_entry()"));
 
