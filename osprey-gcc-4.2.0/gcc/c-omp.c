@@ -730,6 +730,7 @@ c_split_acc_parallel_loop_clauses (tree clauses, tree *par_clauses, tree *ws_cla
 			case ACC_CLAUSE_VECTOR:
 			case ACC_CLAUSE_SEQ:
 			case ACC_CLAUSE_INDEPENDENT:
+			case ACC_CLAUSE_REDUCTION:
 			  ACC_CLAUSE_CHAIN (clauses) = *ws_clauses;
 			  *ws_clauses = clauses;
 			  break;
@@ -738,7 +739,6 @@ c_split_acc_parallel_loop_clauses (tree clauses, tree *par_clauses, tree *ws_cla
 			case ACC_CLAUSE_NUM_GANGS:
 			case ACC_CLAUSE_NUM_WORKERS:
 			case ACC_CLAUSE_VECTOR_LENGTH:
-			case ACC_CLAUSE_REDUCTION:
 			case ACC_CLAUSE_PRIVATE:
 			case ACC_CLAUSE_FIRST_PRIVATE:
 			case ACC_CLAUSE_ASYNC:
