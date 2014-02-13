@@ -1389,10 +1389,10 @@ WGEN_Array_Expr(gs_t exp,
     if (st != base_st) {
       DevWarn ("Encountered VLA at line %d", lineno);
       Is_True(ST_ofst(st) == 0, ("TODO: ST_ofst is not 0"));
-      if(!g_bOffloadRegion)
+      //if(!g_bOffloadRegion)
       	wn = WN_Ldid (Pointer_Mtype, 0, base_st, ST_type (base_st));
-      else
-	wn = WN_Ldid (Pointer_Mtype, 0, st, ST_type (st));
+      //else
+      //	wn = WN_Ldid (Pointer_Mtype, 0, st, ST_type (st));
       if (component_offset != NULL) { // TODO: use ILDA instead
         wn = WN_Binary(OPR_ADD, Pointer_Mtype, wn, component_offset);
       }

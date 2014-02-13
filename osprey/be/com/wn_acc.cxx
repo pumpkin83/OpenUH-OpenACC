@@ -199,6 +199,11 @@ static INT64 GetKernelParamType(ST* pParamST)
     if(kind == KIND_POINTER)
 	{		
 		TY_IDX pty = TY_pointed(ty);
+		//check if it is dynamic array
+		if(TY_kind(pty) == KIND_ARRAY)
+		{
+			pty = TY_etype(pty);
+		}
 		typeID = TY_mtype(pty);
 	}
 	else if(kind == KIND_SCALAR)
@@ -2295,6 +2300,11 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 		if (kind == KIND_POINTER)
 		{
 			TY_IDX pty = TY_pointed(ty);
+			if(TY_kind(pty) == KIND_ARRAY)
+			{
+				//it is an dynamic array
+				pty = TY_etype(pty);
+			}
 			TY_IDX ty_p = Make_Pointer_Type(pty);
 			//in case of 64bit machine, the alignment becomes 8bytes
 			//Set_TY_align(ty_p, 4);
@@ -10075,7 +10085,13 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(ACC_DREGION__ENTRY dEntry,
 		if(kind == KIND_ARRAY)
 			etype = ACC_Get_ElementTYForMultiArray(old_st);
 		else
+		{
 			etype = TY_pointed(ty);
+			if(TY_kind(etype) == KIND_ARRAY)
+                        {
+                                etype = TY_etype(etype);
+                        }
+		}
 		TY_IDX ty_p = Make_Pointer_Type(etype);
 		ST *karg = NULL;
 		WN *device_addr = NULL;

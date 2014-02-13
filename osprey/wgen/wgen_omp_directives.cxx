@@ -2007,26 +2007,66 @@ static WN* WGEN_expand_acc_data_clause_with_region(WN_PRAGMA_ID pragma_name, gs_
 	ST * st = NULL;
 	WN * wn = NULL;
 	st = Get_ST(var);
+	TY_IDX ty =  ST_type(st);
 	WN* wnStart;		
 	WN* wnEnd;
     //WGEN_ACC_Set_Cflag(acc_clause_copy);   //set clause flag for check
+    //For Variable Length Array cases.
+    if(TY_kind(ST_type(st)) == KIND_ARRAY
+		&& st != ST_base(st))
+		st = ST_base(st);
+
     wn = WN_CreateXpragma(pragma_name, st, 1);
 	if(start&&end)
 	{
 		//memory pointer or array
+		OPERATOR oprStart, oprEnd;
 		wnStart = WGEN_Expand_Expr (start); //WN_kid0(wn) 
 		wnEnd = WGEN_Expand_Expr (end); //WN_kid1(wn) 
-		
-		//remember, wnStart < wnEnd, during ACC lower, this will be parsed.
-		//WN* kid0 = WN_Relational (OPR_LT, MTYPE_I4, wnStart, wnEnd);
+		oprStart = WN_operator(wnStart);
+		oprEnd = WN_operator(wnEnd);
+		if((oprStart==OPR_INTCONST) && (oprStart==oprEnd)
+			&& (WN_const_val(wnStart) == 0)
+			&& (WN_const_val(wnEnd) == 0)
+			&& (TY_kind(ty) == KIND_ARRAY))
+		{
+			UINT32 isize;
+			
+			//dynamic array(multi-dimensional array is going to translated into 1D array)
+			//here we assume the lower bound the const and upper bound is variable
+			//static array region is handled by wn_acc.cxx
+			if(TY_kind(TY_etype(ty)) == KIND_SCALAR 
+				&& !ARB_const_ubnd(TY_arb(ty)))
+			{
+				ST_IDX st_idx_upper_bound = ARB_ubnd_var(TY_arb(ty));
+				ST* st_upper_bound = ST_ptr(st_idx_upper_bound);
+				wnEnd = WN_Ldid(TY_mtype(ST_type(st_upper_bound)), 
+								0, st_upper_bound, ST_type(st_upper_bound));
+				wnEnd = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_upper_bound)), 
+										wnEnd, WN_Intconst(TY_mtype(ST_type(st_upper_bound)), 1));
+			}
+			
+		}
 	}
 	else
 	{
 		//which mean this is an array
 		wnStart = WN_Intconst(MTYPE_I4, 0);		
 		wnEnd = WN_Intconst(MTYPE_I4, 0);
-		//WN* kid0 = WN_Relational (OPR_LT, MTYPE_I4, wnStart, wnEnd);
-		//WN_kid1(wn) = NULL;
+		if(TY_kind(ty) != KIND_ARRAY)
+		{
+			Fail_FmtAssertion(("for non array type, user must specify the data region."), ST_name(st));
+		}
+		if(TY_kind(TY_etype(ty)) == KIND_SCALAR
+                              && !ARB_const_ubnd(TY_arb(ty)))
+                {
+                     ST_IDX st_idx_upper_bound = ARB_ubnd_var(TY_arb(ty));
+                     ST* st_upper_bound = ST_ptr(st_idx_upper_bound);
+                     wnEnd = WN_Ldid(TY_mtype(ST_type(st_upper_bound)),
+                                      0, st_upper_bound, ST_type(st_upper_bound));
+                     wnEnd = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_upper_bound)),
+                                      wnEnd, WN_Intconst(TY_mtype(ST_type(st_upper_bound)), 1));
+                }
 	}
     WN* pragmaLength = WN_CreateXpragma(WN_PRAGMA_ACC_CLAUSE_DATA_LENGTH, st, 1);	
 	WN_kid0(wn) = wnStart;
