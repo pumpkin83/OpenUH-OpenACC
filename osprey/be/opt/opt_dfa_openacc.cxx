@@ -306,8 +306,8 @@ static BOOL dfa_scan_is_uncounted_var(ST* st_var)
 {
     if(ST_sym_class(st_var) == CLASS_PREG && ST_sclass(st_var)==SCLASS_REG)
 		return TRUE;
-	if(ST_is_temp_var(st_var))
-		return TRUE;
+	//if(ST_is_temp_var(st_var))
+	//	return TRUE;
 	if(ST_is_not_used(st_var))
 		return TRUE;
 	//to avoid string

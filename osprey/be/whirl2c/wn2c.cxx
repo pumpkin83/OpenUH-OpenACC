@@ -1198,9 +1198,16 @@ static BOOL WN2CUDAIsFunCall_OP(char p)
 
 static const char *WN2CUDA_Opc2cname[NUMBER_OF_OPCODES];
 
-#define WN2CUDA_IS_FUNCALL_OP(opc) \
-   ((WN2CUDA_Opc2cname[opc]!=NULL)? WN2CUDAIsFunCall_OP(WN2CUDA_Opc2cname[opc][0]) : FALSE)
-
+static BOOL WN2CUDA_IS_FUNCALL_OP(OPCODE opc) 
+{
+   BOOL rvalue = FALSE;
+   if(WN2CUDA_Opc2cname[opc]!=NULL)
+	rvalue = WN2CUDAIsFunCall_OP(WN2CUDA_Opc2cname[opc][0]);
+   else
+	rvalue = FALSE;
+   return rvalue;
+   //((WN2CUDA_Opc2cname[opc]!=NULL)? WN2CUDAIsFunCall_OP(WN2CUDA_Opc2cname[opc][0]) : FALSE)
+}
 
 static const OPC2CNAME_MAP WN2CUDA_Opc2cname_Map[] =
 {
@@ -1905,7 +1912,7 @@ static BOOL WN2OpenCL_IsFunCall_OP(char p)
 
 static const char *WN2OpenCL_Opc2cname[NUMBER_OF_OPCODES];
 
-#define WN2CUDA_IS_FUNCALL_OP(opc) \
+#define WN2OpenCL_IS_FUNCALL_OP(opc) \
    ((WN2OpenCL_Opc2cname[opc]!=NULL)? WN2OpenCL_IsFunCall_OP(WN2OpenCL_Opc2cname[opc][0]) : FALSE)
 
 
@@ -5669,7 +5676,6 @@ WN2C_binaryop(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
    
    Is_True(WN_kid_count(wn) == 2, 
      ("Expected 2 kids in WN2C_binaryop for op %s",WN_opc_name(wn)));
-
    if (WN2C_IS_INFIX_OP(WN_opcode(wn)))
       status = WN2C_infix_op(tokens,
 			     WN_opcode(wn),

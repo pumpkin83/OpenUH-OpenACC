@@ -1630,6 +1630,13 @@ static TY_IDX ACC_Get_ElementTYForMultiArray(ST* stArr)
 	TY_IDX ty = ST_type(stArr);
 	TY_KIND kind = TY_kind(ty);
 	int idim = 1;
+	
+	//if the st is dynamic array, then ST kind is pointer, 
+	//TY_pointed will be an array
+	if(TY_kind(ty) == KIND_POINTER)
+	{		
+		ty = TY_pointed(ty);
+	}
 	if(TY_kind(TY_etype(ty)) != KIND_SCALAR 
 				&& TY_kind(TY_etype(ty)) == KIND_ARRAY)
 	{
@@ -1737,11 +1744,13 @@ static WN* ACC_GetArrayStart(ACC_DREGION__ENTRY dEntry)
 	TY_KIND kind = TY_kind(ty);
 	
 	WN* wnLower = WN_kid0(wnArr);
-	OPCODE oplower = WN_opcode(wnLower);
+	//OPCODE oplower = WN_opcode(wnLower);
+	OPERATOR oplower = WN_operator(wnLower);
 	WN* wnUpper = wnLength;
-	OPCODE opupper = WN_opcode(wnUpper);
+	//OPCODE opupper = WN_opcode(wnUpper);
+	OPERATOR opupper = WN_operator(wnLower);
 	//Two cases: array with no region limite which mean the entire array; buffer with region declaration
-	if((oplower==OPC_I4INTCONST)
+	if((oplower==OPR_INTCONST)
 			&& (WN_const_val(wnLower) == 0))
 	{
 		//////////////////////////////////////////////////////////////////////
@@ -1786,11 +1795,13 @@ static WN* ACC_GetArraySize(ACC_DREGION__ENTRY dEntry)
 	TY_KIND kind = TY_kind(ty);
 	
 	WN* wnLower = WN_kid0(wnArr);
-	OPCODE oplower = WN_opcode(wnLower);
+	//OPCODE oplower = WN_opcode(wnLower);
+	OPERATOR oplower = WN_operator(wnLower);
 	WN* wnUpper = wnLength;
-	OPCODE opupper = WN_opcode(wnUpper);
+	//OPCODE opupper = WN_opcode(wnUpper);
+	OPERATOR opupper = WN_operator(wnUpper);
 	//Two cases: array with no region limite which mean the entire array; buffer with region declaration
-	if((oplower==OPC_I4INTCONST) && (oplower==opupper)
+	if((oplower==OPR_INTCONST) && (oplower==opupper)
 			&& (WN_const_val(wnLower) == 0)
 			&& (WN_const_val(wnUpper) == 0))
 	{
