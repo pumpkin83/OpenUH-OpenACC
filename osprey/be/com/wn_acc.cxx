@@ -1735,6 +1735,13 @@ static WN* ACC_Load_MultiDimArray_StartAddr(WN* wnArr)
     return arr_ref;
 }
 
+static TY_IDX ACC_GetArrayElemType(TY_IDX ty)
+{
+    TY_IDX tyElement = TY_etype(ty);
+    while(TY_kind(tyElement) == KIND_ARRAY)
+        tyElement = TY_etype(tyElement);
+    return tyElement;
+}
 
 //WN node must have a kid which includes buffer region
 //wnArr is a pragma wn node which includes variable declaration
@@ -1771,12 +1778,18 @@ static WN* ACC_GetArrayStart(ACC_DREGION__ENTRY dEntry)
 		if(kind == KIND_ARRAY)
 		{
 			TY_IDX tyElement = TY_etype(ty);
+			while(TY_kind(tyElement) == KIND_ARRAY)
+                                tyElement = TY_etype(tyElement);
 			INT32 elemSize = TY_size(tyElement);
 			wnElementsize = WN_Intconst(MTYPE_U4, elemSize);
 		}
 		else if(kind == KIND_POINTER)
 		{
 			TY_IDX tyPointed = TY_pointed(ty);
+			if(TY_kind(tyPointed)==KIND_ARRAY)
+				tyPointed = ACC_GetArrayElemType(tyPointed);
+			if(TY_kind(tyPointed) != KIND_SCALAR)
+				Fail_FmtAssertion("Pointer %s is not scalar pointer.", ST_name(stArr));
 			INT32 elemSize = TY_size(tyPointed);
 			wnElementsize = WN_Intconst(MTYPE_U4, elemSize);
 		}
@@ -1812,7 +1825,7 @@ static WN* ACC_GetArraySize(ACC_DREGION__ENTRY dEntry)
 	{
 		//////////////////////////////////////////////////////////////////////
 		//Array		
-		Is_True(kind == KIND_ARRAY, ("not array type in ACC_GetArraySize."));
+		Is_True(FALSE, ("Array size should be processed early."));
 		//process the multi dimensional array
 		UINT32 isize;
 		if(TY_kind(TY_etype(ty)) != KIND_SCALAR 
@@ -1842,12 +1855,18 @@ static WN* ACC_GetArraySize(ACC_DREGION__ENTRY dEntry)
 		if(kind == KIND_ARRAY)
 		{
 			TY_IDX tyElement = TY_etype(ty);
+			while(TY_kind(tyElement) == KIND_ARRAY)
+				tyElement = TY_etype(tyElement);
 			INT32 elemSize = TY_size(tyElement);
 			wnElementsize = WN_Intconst(MTYPE_U4, elemSize);
 		}
 		else if(kind == KIND_POINTER)
 		{
 			TY_IDX tyPointed = TY_pointed(ty);
+			if(TY_kind(tyPointed)==KIND_ARRAY)
+				tyPointed = ACC_GetArrayElemType(tyPointed);
+			if(TY_kind(tyPointed) != KIND_SCALAR)
+                                Fail_FmtAssertion("Pointer %s is not scalar pointer.", ST_name(stArr));
 			INT32 elemSize = TY_size(tyPointed);
 			wnElementsize = WN_Intconst(MTYPE_U4, elemSize);
 		}
@@ -2303,7 +2322,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 			if(TY_kind(pty) == KIND_ARRAY)
 			{
 				//it is an dynamic array
-				pty = TY_etype(pty);
+				pty = ACC_GetArrayElemType(pty);
 			}
 			TY_IDX ty_p = Make_Pointer_Type(pty);
 			//in case of 64bit machine, the alignment becomes 8bytes
@@ -2321,7 +2340,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 		}
 		else if (kind == KIND_ARRAY)
 		{
-			TY_IDX etype = ACC_Get_ElementTYForMultiArray(old_st);
+			TY_IDX etype = ACC_GetArrayElemType(ty);
 			TY_IDX ty_p = Make_Pointer_Type(etype);
 			//Set_TY_align(ty_p, 4);
 			new_st = New_ST( CURRENT_SYMTAB );
@@ -2353,7 +2372,7 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				ty_param = ty;
 				new_st = New_ST( CURRENT_SYMTAB );
 				ST_Init(new_st,
-						Save_Str( ST_name(old_st)),
+						Save_Str2("_d_", ST_name(old_st)),
 						CLASS_VAR,
 						SCLASS_FORMAL,
 						EXPORT_LOCAL,
@@ -9445,6 +9464,35 @@ ACC_Walk_and_Localize (WN * tree)
     // PV 600983: don't translate labels (or exception regions) inside
     // orphaned constructs
   }*/
+  else if (opr == OPR_ARRAY && WN_num_dim(tree)==1
+  	&& TY_kind(ST_type(WN_st(WN_array_base(tree))))==KIND_POINTER
+	&& TY_kind(TY_pointed(ST_type(WN_st(WN_array_base(tree)))))==KIND_ARRAY) 
+  {
+	WN* wn_base = WN_array_base(tree) ;
+    old_sym = WN_st(wn_base);
+	ST* new_sym = NULL;
+	UINT32 esize = WN_element_size(tree);
+	WN* wn_index = WN_COPY_Tree(WN_kid(tree, 2));
+	WN* wn_offset = WN_Binary(OPR_MPY, 
+						MTYPE_U4, 
+						wn_index, 
+						WN_Intconst(MTYPE_U4, esize));
+	
+	map<ST*, ACC_VAR_TABLE>::iterator itor = acc_local_new_var_map.find(old_sym);
+	
+	if(itor != acc_local_new_var_map.end())	
+	{
+	  	ACC_VAR_TABLE newVar = itor->second;
+		new_sym = newVar.new_st;
+		WN* wn_ldidbase = WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
+		WN* newtree = WN_Binary(OPR_ADD, 
+					MTYPE_U4, 
+					wn_offset, 
+					wn_ldidbase);
+		WN_DELETE_Tree(tree);
+		tree = (newtree);
+	}
+  }
   else if (opr == OPR_ARRAY && WN_num_dim(tree)>1) 
   {
   	int idim = WN_num_dim(tree);
@@ -10083,13 +10131,14 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(ACC_DREGION__ENTRY dEntry,
 	{
 		TY_IDX etype;
 		if(kind == KIND_ARRAY)
-			etype = ACC_Get_ElementTYForMultiArray(old_st);
+			etype = ACC_GetArrayElemType(ty);
 		else
 		{
 			etype = TY_pointed(ty);
 			if(TY_kind(etype) == KIND_ARRAY)
                         {
-                                etype = TY_etype(etype);
+                                //etype = TY_etype(etype);
+                                etype = ACC_GetArrayElemType(etype);
                         }
 		}
 		TY_IDX ty_p = Make_Pointer_Type(etype);
@@ -10172,9 +10221,13 @@ static ST* ACC_GenDeclareSingleDeviceMem(ACC_DREGION__ENTRY dentry,
 	{
 		TY_IDX etype;
 		if(kind == KIND_ARRAY)
-			etype = TY_etype(ty);
+			etype = ACC_GetArrayElemType(ty);
 		else
+		{
 			etype = TY_pointed(ty);
+			if(TY_kind(etype) == KIND_ARRAY)
+				etype = ACC_GetArrayElemType(etype);
+		}
 		TY_IDX ty_p = Make_Pointer_Type(etype);
 		ST *karg = NULL;
 		WN *device_addr = NULL;

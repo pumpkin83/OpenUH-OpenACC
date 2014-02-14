@@ -2057,7 +2057,58 @@ static WN* WGEN_expand_acc_data_clause_with_region(WN_PRAGMA_ID pragma_name, gs_
 		{
 			Fail_FmtAssertion(("for non array type, user must specify the data region."), ST_name(st));
 		}
-		if(TY_kind(TY_etype(ty)) == KIND_SCALAR
+		
+		BOOL bconst_Lbnd = ARB_stride_var(TY_arb(ty));
+		BOOL bconst_ubnd = ARB_const_ubnd(TY_arb(ty));
+		BOOL bconst_stride = ARB_const_stride(TY_arb(ty));
+		ST* st_ubnd = NULL;
+		ST* st_stride = NULL;
+		UINT32 lbnd = 0;
+	        UINT32 ubnd = 0;
+		UINT32 stride = 0;
+		WN* wn_lbnd = 0;
+		WN* wn_ubnd = 0;
+		WN* wn_stride = 0;
+		TY_IDX ty_elem = TY_etype(ty);
+		UINT32 elem_size = 0;
+		while(TY_kind(ty_elem)==KIND_ARRAY)
+		{
+			ty_elem = TY_etype(ty_elem);
+		}
+		elem_size = TY_size(ty_elem);
+
+		if(!bconst_ubnd)
+		{
+			st_ubnd = ST_ptr(ARB_ubnd_var(TY_arb(ty)));
+			wn_ubnd = WN_Ldid(TY_mtype(ST_type(st_ubnd)),
+                                      0, st_ubnd, ST_type(st_ubnd));
+			wn_ubnd = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_ubnd)),
+                                      wn_ubnd, WN_Intconst(TY_mtype(ST_type(st_ubnd)), 1));
+		}
+		else
+		{
+			ubnd = ARB_ubnd_val(TY_arb(ty));
+			ubnd = ubnd + 1;
+			wn_ubnd = WN_Intconst(MTYPE_U4, ubnd);
+		}
+		
+		if(!bconst_stride)
+		{
+			st_stride = ST_ptr(ARB_stride_var(TY_arb(ty)));
+			wn_stride = WN_Ldid(TY_mtype(ST_type(st_stride)),
+                                      0, st_stride, ST_type(st_stride));
+			wn_stride = WN_Binary(OPR_DIV, TY_mtype(ST_type(st_stride)),
+                                      wn_stride, WN_Intconst(TY_mtype(ST_type(st_stride)), elem_size));
+		}
+		else
+		{
+			stride = ARB_stride_val(TY_arb(ty));
+			stride = stride/elem_size;
+			wn_stride = WN_Intconst(MTYPE_U4, stride);
+		}
+		wnEnd = WN_Binary(OPR_MPY, MTYPE_U4,
+                                      wn_ubnd, wn_stride);
+		/*if(TY_kind(TY_etype(ty)) == KIND_SCALAR
                               && !ARB_const_ubnd(TY_arb(ty)))
                 {
                      ST_IDX st_idx_upper_bound = ARB_ubnd_var(TY_arb(ty));
@@ -2066,7 +2117,7 @@ static WN* WGEN_expand_acc_data_clause_with_region(WN_PRAGMA_ID pragma_name, gs_
                                       0, st_upper_bound, ST_type(st_upper_bound));
                      wnEnd = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_upper_bound)),
                                       wnEnd, WN_Intconst(TY_mtype(ST_type(st_upper_bound)), 1));
-                }
+                }*/
 	}
     WN* pragmaLength = WN_CreateXpragma(WN_PRAGMA_ACC_CLAUSE_DATA_LENGTH, st, 1);	
 	WN_kid0(wn) = wnStart;
