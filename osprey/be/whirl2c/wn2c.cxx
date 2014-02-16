@@ -509,8 +509,8 @@ static const OPC2CNAME_MAP WN2C_Opc2cname_Map[] =
   {OPC_I4NEG, "-"},
   {OPC_F4NEG, "-"},
   {OPC_C4NEG, "_C4NEG"},
-  {OPC_I4ABS, "_I4ABS"},
-  {OPC_F4ABS, "_F4ABS"},
+  {OPC_I4ABS, "abs"},
+  {OPC_F4ABS, "fabsf"},
 #ifdef TARG_IA64
   {OPC_F10ABS, "_F10ABS"},
 #elif defined (TARG_X8664)
@@ -518,14 +518,14 @@ static const OPC2CNAME_MAP WN2C_Opc2cname_Map[] =
   {OPC_V16F8ABS, "_V16F8ABS"},
 #endif
   {OPC_FQABS, "_FQABS"},
-  {OPC_I8ABS, "_I8ABS"},
-  {OPC_F8ABS, "_F8ABS"},
-  {OPC_F4SQRT, "_F4SQRT"},
+  {OPC_I8ABS, "abs"},
+  {OPC_F8ABS, "fabs"},
+  {OPC_F4SQRT, "sqrtf"},
   {OPC_C4SQRT, "_C4SQRT"},
   {OPC_F10SQRT, "_F10SQRT"},
   {OPC_FQSQRT, "_FQSQRT"},
   {OPC_CQSQRT, "_CQSQRT"},
-  {OPC_F8SQRT, "_F8SQRT"},
+  {OPC_F8SQRT, "sqrt"},
   {OPC_C8SQRT, "_C8SQRT"},
   {OPC_I4F4RND, "_I4F4RND"},
   {OPC_I4F10RND, "_I4F10RND"},
@@ -6835,7 +6835,8 @@ WN2C_mstore(TOKEN_BUFFER tokens, const WN *wn, CONTEXT context)
       else
       {
 	 /* Need to copy byte by byte, from kid0 to kid1 */
-	 Append_Token_String(tokens, "__MSTORE");
+	 //Append_Token_String(tokens, "__MSTORE");
+	 Append_Token_String(tokens, "_w2c_mstore");
 	 Append_Token_Special(tokens, '(');
 	 (void)WN2C_translate(tokens, WN_kid0(WN_kid0(wn)), context);
 	 Append_Token_Special(tokens, ',');

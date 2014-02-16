@@ -9540,7 +9540,7 @@ ACC_Walk_and_Localize (WN * tree)
 		   			wn_offset = WN_Binary(OPR_ADD, 
 			   					WN_rtype(wn_index), 
 		   						wn_offset, 
-		   						wn_index);
+		   						WN_COPY_Tree(wn_index));
 				else
 					wn_offset = wn_index;
 				if(wn_dimInOne == NULL)

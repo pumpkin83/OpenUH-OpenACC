@@ -12,6 +12,11 @@ int MODULE_BASE;
 
 static int __accr_remove_device_from_hashmap(void* pDevice);
 
+extern void _w2c_mstore(void* src, int src_offset, void* dst, int dst_offset, int ilength)
+{
+    memcpy(dst+dst_offset, src+src_offset, ilength);
+}
+
 void* __acc_malloc_handler(unsigned int size)
 {
 	void *ptr;

@@ -950,6 +950,15 @@ Post_LNO_Processing (PU_Info *current_pu, WN *pu)
           if (Cur_PU_Feedback)
             W2C_Set_Frequency_Map(WN_MAP_FEEDBACK);
           W2C_Outfile_Translate_Pu(pu, TRUE/*emit_global_decls*/);
+	  //if source2source translation enabled, the offload acc rountine function 
+	  //have to be generated into two copies:CPU and Accelerator version.
+	  if(PU_acc_routine(Get_Current_PU())&&run_ACCS2S)
+	  {
+		Clear_PU_acc_routine(Get_Current_PU());
+		W2C_Outfile_Translate_Pu(pu, TRUE);
+		//set back
+		Set_PU_acc_routine(Get_Current_PU());
+	  }
         }
       }
     }
@@ -1437,9 +1446,13 @@ Backend_Processing (PU_Info *current_pu, WN *pu)
         Is_True(WHIRL_Return_Val_On && WHIRL_Mldid_Mstid_On,
 	        ("-INTERNAL:return_val and -INTERNAL:mldid_mstid must be on the same time"));
 	pu = WN_Lower (pu, LOWER_RETURN_VAL, NULL,
-		       "RETURN_VAL & MLDID/MSTID lowering");
+		       "RETURN_VAL lowering");
+	if(run_ACCS2S)
+		pu = WN_Lower(pu, LOWER_MLDID_MSTID, NULL, 
+			"MLDID/MSTID lowering");
+	   
     }
-
+	
 #ifdef KEY // bug 9171
     if (Run_autopar && Early_MP_Processing) {
       Early_MP_Processing = FALSE;

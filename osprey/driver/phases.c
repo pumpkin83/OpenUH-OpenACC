@@ -3469,19 +3469,7 @@ run_compiler (int argc, char *argv[])
 			/* reset source-lang to be invoked-lang for linking */
 			source_lang = get_source_lang(source_kind);
 			run_ld ();
-			//check if it is necessary to run CUDA files
-			if(compiling_cuda == TRUE)
-			{
-				if(!nvcc_path)					
-				{
-					fprintf(stderr, "NVIDIA CUDA compiler should be provided with -nvpath,PATH.\n");
-					nvcc_path = "";
-				}
-				char* full_path =concat_strings(nvcc_path, get_phase_name(P_nvcc));
-				nvcc_args = init_string_list();
-				add_file_args (nvcc_args, P_nvcc);
-				run_phase (P_nvcc, full_path, nvcc_args);
-			}
+			
 			if (Gen_feedback)
 			   run_pixie ();
 		} else {
@@ -3529,6 +3517,41 @@ run_compiler (int argc, char *argv[])
 #endif
 			run_phase (phase_order[i],
 				   get_full_phase_name(phase_order[i]), args);
+			//check if it is necessary to run CUDA files
+			if(phase_order[i] == P_be && compiling_cuda == TRUE)
+			{
+				char *the_file = fix_name_by_phase(source_file, P_nvcc);
+ 				char* pname = strdup(the_file);
+				int index;
+				buffer_t buf;
+				FILE* file;
+	
+				for ( index=strlen(pname)-1; index>=0; index-- ) 
+				{
+				    if ( pname[index] == '/' ) 
+					break;
+			    	    if ( pname[index] == '.' ) 
+				    {
+			      		pname[index] = 0;
+			      		break;
+			    	    }
+		  		}
+				sprintf(buf, "%s.w2c.cu", pname);
+				file = fopen(buf, "r");
+				if(file != NULL)
+				{
+					fclose(file);
+					if(!nvcc_path)					
+					{
+						fprintf(stderr, "NVIDIA CUDA compiler should be provided with -nvpath,PATH.\n");
+						nvcc_path = "";
+					}
+					char* full_path =concat_strings(nvcc_path, get_phase_name(P_nvcc));
+					nvcc_args = init_string_list();
+					add_file_args (nvcc_args, P_nvcc);
+					run_phase (P_nvcc, full_path, nvcc_args);
+				}
+			}
                         /* undefine the environment variable
                          * DEPENDENCIES_OUTPUT after the pre-processor phase -
                          * bug 386.
