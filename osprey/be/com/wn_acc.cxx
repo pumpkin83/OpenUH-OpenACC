@@ -1,50 +1,9 @@
-/*
- * Copyright (C) 2009-2010 Advanced Micro Devices, Inc.  All Rights Reserved.
- */
-
-/*
- *  Copyright (C) 2007. QLogic Corporation. All Rights Reserved.
- */
-
-/*
- * Copyright 2003, 2004, 2005, 2006 PathScale, Inc.  All Rights Reserved.
- */
-
-/*
-
-  Copyright (C) 2000, 2001 Silicon Graphics, Inc.  All Rights Reserved.
-
-  This program is free software; you can redistribute it and/or modify it
-  under the terms of version 2 of the GNU General Public License as
-  published by the Free Software Foundation.
-
-  This program is distributed in the hope that it would be useful, but
-  WITHOUT ANY WARRANTY; without even the implied warranty of
-  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  
-
-  Further, this software is distributed without any warranty that it is
-  free of the rightful claim of any third person regarding infringement 
-  or the like.  Any license provided herein, whether implied or 
-  otherwise, applies only to this software file.  Patent licenses, if 
-  any, provided herein do not apply to combinations of this program with 
-  other software, or any other product whatsoever.  
-
-  You should have received a copy of the GNU General Public License along
-  with this program; if not, write the Free Software Foundation, Inc., 59
-  Temple Place - Suite 330, Boston MA 02111-1307, USA.
-
-  Contact information:  Silicon Graphics, Inc., 1600 Amphitheatre Pky,
-  Mountain View, CA 94043, or:
-
-  http://www.sgi.com
-
-  For further information regarding this notice, see:
-
-  http://oss.sgi.com/projects/GenInfo/NoticeExplan
- ***************************************************************************
+ /***************************************************************************
   This file is created by Xiaonan(Daniel) Tian from HPCTools, University of Houston
   (daniel.xntian@gmail.com) for OpenUH OpenACC compiler.
   It is intended to lower the OpenACC pragma.
+  It is free to use. However, please keep the original author.
+  http://www2.cs.uh.edu/~xntian2/
 */
 
 #include <stdint.h>
@@ -3449,7 +3408,7 @@ ACC_Extract_Index_Info ( WN* pdo_node )
   }
 }
 
-static WN* GenFinalReductionAlgorithm(ST* st_dbuffer, ST* st_host, 
+static WN* GenFinalReductionAlgorithm(ST* st_dbuffer, ST* st_dhost, 
 				ST* st_reduction_kernel_name, ST* st_num_of_element, UINT32 iTypesize)
 {
 	//Set_ST_name_idx
@@ -3464,7 +3423,7 @@ static WN* GenFinalReductionAlgorithm(ST* st_dbuffer, ST* st_host,
 	WN_Set_Call_Non_Parm_Ref(wn);
 	WN_Set_Call_Parm_Ref(wn);
 		
-	wnx = WN_Lda( Pointer_type, 0, st_host);
+	wnx = WN_Ldid( Pointer_type, 0, st_dhost, ST_type(st_dhost));
     WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
                        WN_ty(wnx), WN_PARM_BY_REFERENCE);
   
@@ -8340,8 +8299,21 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 			ST *st_old = reductionmap.hostName;
 			ST *st_device = reductionmap.deviceName;
 			ST *st_reductionKernel = reductionmap.reduction_kenels;			
-			WN* wn_reduction_final_stmt = GenFinalReductionAlgorithm(st_device, st_old,
+			ACC_SCALAR_VAR_INFO* scalar_var_info = acc_offload_scalar_management_tab[st_old];
+			if(!scalar_var_info->is_reduction)
+				Fail_FmtAssertion("Scalar %s is not reduction variable.\n", ST_name(st_old));
+			if(scalar_var_info->acc_scalar_type != ACC_SCALAR_VAR_INOUT)
+				Fail_FmtAssertion("Scalar reduction variable %s is not inout type. double check\n",
+							ST_name(st_old));
+			if(!scalar_var_info->st_device_in_host)
+				Fail_FmtAssertion("Scalar reduction variable %s has no respective device variable in host side.\n", 
+							ST_name(st_old));
+			ST* st_device_onhost = scalar_var_info->st_device_in_host;
+			WN* wn_reduction_final_stmt = GenFinalReductionAlgorithm(st_device, st_device_onhost,
 				st_reductionKernel, reductionmap.st_num_of_element, TY_size(ST_type(st_old)));
+
+			//WN* wn_reduction_final_stmt = GenFinalReductionAlgorithm(st_device, st_old,
+			//	st_reductionKernel, reductionmap.st_num_of_element, TY_size(ST_type(st_old)));
 			WN_INSERT_BlockLast(wn_replace_block, wn_reduction_final_stmt);
 			iRdIdx ++;
 		}

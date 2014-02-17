@@ -34,7 +34,7 @@ typedef enum
 	ACC_KDATA_DOUBLE
 } ACC_KERNEL_DATA_TYPE;
 
-extern void _w2c_mstore(void* src, int src_offset, void dst, int dst_offset, int ilength);
+extern void _w2c_mstore(void* src, int src_offset, void* dst, int dst_offset, int ilength);
 extern void __accr_setup(void);
 
 extern void __accr_cleanup(void);
