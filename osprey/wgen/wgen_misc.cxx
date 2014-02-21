@@ -193,6 +193,10 @@ static void Set_OpenACCS2S_Flags(int argc, char**argv)
 	{
       g_bOpenACC_flag = TRUE;
     } 
+       else if (strcmp(arg, "-acc") == 0)
+	{
+      g_bOpenACC_flag = TRUE;
+    } 
 	else if (strcmp(arg, "-s2s") == 0)
 	{
       g_bOpenACCS2S_flag = TRUE;

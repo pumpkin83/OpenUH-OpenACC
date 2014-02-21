@@ -627,6 +627,8 @@ typedef struct ACC_SCALAR_VAR_INFO
 	//scalar type
 	ST* st_device_in_klocal;
 	BOOL is_reduction; //reduction variable can also be one of ACC_SCALAR_TYPE.
+	BOOL is_across_gangs; //if this reduction is across gangs, it requires another reduction kernel launch.
+	OPERATOR opr_reduction;
 	UINT32 isize; //size in bytes, transfer between host and device
 }ACC_SCALAR_VAR_INFO;
 
@@ -996,6 +998,7 @@ static ST* ACC_GenerateVectorReduction_rolling(ACC_ReductionMap* pReduction_map)
 static ST* ACC_GenerateWorkerReduction_rolling(ACC_ReductionMap* pReduction_map);
 static WN* Gen_Sync_Threads();
 static WN* ACC_GenFreeDeviceMemory(ST* st_device_mem);
+static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr, TYPE_ID rtype);
 
 
 
@@ -1909,7 +1912,7 @@ Gen_DataD2H (ST *Src, ST *Dst, WN* wnSize, WN* wnStart)
   //	wnx = ACC_Load_MultiDimArray_StartAddr(wnx);
   //wnx = WN_Lda( Pointer_type, 0, Dst);
   WN_kid(wn, 1) = WN_CreateParm(Pointer_type, wnx, 
-                       WN_ty(wnx), WN_PARM_BY_VALUE);
+                       WN_ty(wnx), WN_PARM_BY_REFERENCE);
   
   WN_kid(wn, 2) = WN_CreateParm(MTYPE_U4, wnSize, 
 		  Be_Type_Tbl(MTYPE_U4), WN_PARM_BY_VALUE);
@@ -2421,6 +2424,8 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_INOUT)
 				{
 					pVarInfo->is_reduction = TRUE;
+					pVarInfo->is_across_gangs = TRUE; 
+					pVarInfo->opr_reduction = reductionmap.ReductionOpr;
 					st_reduction_private_var = pVarInfo->st_device_in_klocal;
 					//create parameter	
 				    TY_IDX ty_elem = ST_type(st_host);
@@ -2563,10 +2568,11 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 						reductionmap.st_Inkernel = acc_st_shared_memory;					
 					}
 					//create thread-private reduction var for each reduction
-					st_reduction_private_var = New_ST( CURRENT_SYMTAB );
-					ST_Init(st_reduction_private_var, Save_Str2("__private_", 
-							ST_name(st_host)), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+					//st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+					//ST_Init(st_reduction_private_var, Save_Str2("__private_", 
+					//		ST_name(st_host)), CLASS_VAR, 
+					//		SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
 					//init/output type size buffer
 					reductionmap.st_inout_used = pVarInfo->st_device_in_kparameters;
 				}
@@ -2673,10 +2679,11 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 						reductionmap.st_Inkernel = acc_st_shared_memory;					
 					}
 					//create thread-private reduction var for each reduction
-					st_reduction_private_var = New_ST( CURRENT_SYMTAB );
-					ST_Init(st_reduction_private_var, Save_Str2("__private_", 
-							ST_name(st_host)), CLASS_VAR, 
-							SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
+					st_reduction_private_var = pVarInfo->st_device_in_klocal;
+					//st_reduction_private_var = New_ST( CURRENT_SYMTAB );
+					//ST_Init(st_reduction_private_var, Save_Str2("__private_", 
+					//		ST_name(st_host)), CLASS_VAR, 
+					//		SCLASS_AUTO, EXPORT_LOCAL, ST_type(st_host));
 					//init/output type size buffer
 					reductionmap.st_inout_used = pVarInfo->st_device_in_kparameters;
 				}
@@ -8086,6 +8093,34 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 		    acc_local_new_var_map[st_private] = var;
 		}
 	}
+	//setup predefined data in CUDA
+	threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)),
+                                        0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
+        threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)),
+                                        0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
+        threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)),
+                                        0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
+
+        blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)),
+                                        0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
+        blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)),
+                                        0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
+        blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)),
+                                        0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
+
+        blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)),
+                                        0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
+        blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)),
+                                        0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
+        blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)),
+                                        0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
+
+        griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)),
+                                        0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
+        griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)),
+                                        0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
+        griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)),
+                                        0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
 	/*********************************************************/
 	//Init IN/OUT scalar variables
 	/*{	
@@ -8103,55 +8138,64 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 	}*/
 	//Init IN/OUT scalar variables
 	//map<ST*, ACC_SCALAR_INOUT_INFO*>::iterator itor;// = acc_scalar_inout_nodes.begin();
-	itor_offload_info = acc_offload_scalar_management_tab.begin();
-	for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
 	{
-		ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
-		//several cases:
-		//1. ACC_SCALAR_VAR_IN, initialized in parameter
-		//2. ACC_SCALAR_VAR_OUT : no init
-		//3. ACC_SCALAR_VAR_INOUT: need init
-		//2. ACC_SCALAR_VAR_PRIVATE no init
-		if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT)
+		
+		WN* test1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_x)), 
+					WN_COPY_Tree(threadidx), 
+					WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_x)), 0));
+		WN* test2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_threadIdx_y)), 
+					WN_COPY_Tree(threadidy), 
+					WN_Intconst(TY_mtype(ST_type(glbl_threadIdx_y)), 0));
+		WN* test3 = WN_Relational (OPR_EQ, TY_mtype(ST_type(glbl_blockIdx_x)), 
+					WN_COPY_Tree(blockidx), 
+					WN_Intconst(TY_mtype(ST_type(glbl_blockIdx_x)), 0));
+		WN* wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, test1, test2);
+		wn_If_stmt_test = WN_Binary (OPR_CAND, Boolean_type, wn_If_stmt_test, test3);
+		WN* wn_thenblock = WN_CreateBlock();
+		WN* wn_elseblock = WN_CreateBlock();
+		UINT32 reduction_across_gangs_counter = 0;
+
+		itor_offload_info = acc_offload_scalar_management_tab.begin();
+		for(; itor_offload_info!=acc_offload_scalar_management_tab.end(); itor_offload_info++)
 		{
-			ST* st_scalar = pVarInfo->st_device_in_klocal;
-			ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
-			TY_IDX elem_ty = ST_type(st_scalar);			
-			WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
-			WN* Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, wn_scalar_ptr);
-			Init0 = WN_Stid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar), Init0);
-			WN_INSERT_BlockLast(wn_parallelBlock, Init0);
+			ACC_SCALAR_VAR_INFO* pVarInfo = itor_offload_info->second;
+			//several cases:
+			//1. ACC_SCALAR_VAR_IN, initialized in parameter
+			//2. ACC_SCALAR_VAR_OUT : no init
+			//3. ACC_SCALAR_VAR_INOUT: need init
+			//2. ACC_SCALAR_VAR_PRIVATE no init
+			if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT)
+			{
+				ST* st_scalar = pVarInfo->st_device_in_klocal;
+				ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
+				TY_IDX elem_ty = ST_type(st_scalar);			
+				WN* wn_scalar_ptr = WN_Ldid(Pointer_type, 0, st_scalar_ptr, ST_type(st_scalar_ptr));
+				WN* Init0 = WN_Iload(TY_mtype(elem_ty), 0,  elem_ty, wn_scalar_ptr);
+				Init0 = WN_Stid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar), Init0);
+				//if this is a reduction across gangs
+				if(pVarInfo->is_across_gangs == TRUE)
+				{	
+					OPERATOR ReductionOpr = pVarInfo->opr_reduction;
+					TY_IDX ty = ST_type(pVarInfo->st_var);
+					WN* Init1 = ACC_Get_Init_Value_of_Reduction(ReductionOpr, TY_mtype(ty));
+					Init1 = WN_Stid(TY_mtype(elem_ty), 0, st_scalar, ST_type(st_scalar), Init1);
+					WN_INSERT_BlockLast(wn_elseblock, Init1);
+					WN_INSERT_BlockLast(wn_thenblock, Init0);
+					reduction_across_gangs_counter ++;
+					//Init0 = WN_CreateIf(wn_If_stmt_test, wn_thenblock, wn_elseblock);
+					//WN_INSERT_BlockLast(wn_parallelBlock, Init0);
+				}
+				else 
+					WN_INSERT_BlockLast(wn_parallelBlock, Init0);
+			}
+		}
+		if(reduction_across_gangs_counter)
+		{
+			WN* wn_ifthenelse = WN_CreateIf(wn_If_stmt_test, wn_thenblock, wn_elseblock);
+			WN_INSERT_BlockLast(wn_parallelBlock, wn_ifthenelse);
 		}
 	}
 	
-	//Set up predefined variable in CUDA
-	threadidx = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_x)), 
-					0, glbl_threadIdx_x, ST_type(glbl_threadIdx_x));
-	threadidy = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_y)), 
-					0, glbl_threadIdx_y, ST_type(glbl_threadIdx_y));
-	threadidz = WN_Ldid(TY_mtype(ST_type(glbl_threadIdx_z)), 
-					0, glbl_threadIdx_z, ST_type(glbl_threadIdx_z));
-	
-	blockidx = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_x)), 
-					0, glbl_blockIdx_x, ST_type(glbl_blockIdx_x));
-	blockidy = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_y)), 
-					0, glbl_blockIdx_y, ST_type(glbl_blockIdx_y));
-	blockidz = WN_Ldid(TY_mtype(ST_type(glbl_blockIdx_z)), 
-					0, glbl_blockIdx_z, ST_type(glbl_blockIdx_z));
-	
-	blockdimx = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_x)), 
-					0, glbl_blockDim_x, ST_type(glbl_blockDim_x));
-	blockdimy = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_y)), 
-					0, glbl_blockDim_y, ST_type(glbl_blockDim_y));
-	blockdimz = WN_Ldid(TY_mtype(ST_type(glbl_blockDim_z)), 
-					0, glbl_blockDim_z, ST_type(glbl_blockDim_z));
-	
-	griddimx = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_x)), 
-					0, glbl_gridDim_x, ST_type(glbl_gridDim_x));
-	griddimy = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_y)), 
-					0, glbl_gridDim_y, ST_type(glbl_gridDim_y));
-	griddimz = WN_Ldid(TY_mtype(ST_type(glbl_gridDim_z)), 
-					0, glbl_gridDim_z, ST_type(glbl_gridDim_z));
 	//Begin transform the loop
 	if(acc_parallel_loop_info.wn_prehand_nodes)
 	{
@@ -8227,8 +8271,9 @@ Transform_ACC_Parallel_Block ( WN * tree, ParallelRegionInfo* pPRInfo, WN* wn_re
 			//2. ACC_SCALAR_VAR_OUT : no init
 			//3. ACC_SCALAR_VAR_INOUT: need init
 			//2. ACC_SCALAR_VAR_PRIVATE no init
-			if(pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT 
-				|| pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_OUT)
+			//if it is a reduction across operation, there is no necessary to copyout
+			if((pVarInfo->is_across_gangs != TRUE) && (pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_INOUT 
+				|| pVarInfo->acc_scalar_type == ACC_SCALAR_VAR_OUT))
 			{				
 				ST* st_scalar = pVarInfo->st_device_in_klocal;
 				ST* st_scalar_ptr = pVarInfo->st_device_in_kparameters;
@@ -10036,6 +10081,7 @@ static void ACC_Process_scalar_variable_for_offload_region()
 		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_INOUT;
 		pVarInfo->st_var = st_var;
 		pVarInfo->is_reduction = FALSE;
+		pVarInfo->is_across_gangs = FALSE;
 	}
 	for(vindex=0; vindex<acc_dregion_lprivate.size(); vindex++)
 	{
@@ -10051,6 +10097,7 @@ static void ACC_Process_scalar_variable_for_offload_region()
 		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_OUT;
 		pVarInfo->st_var = st_var;
 		pVarInfo->is_reduction = FALSE;
+		pVarInfo->is_across_gangs = FALSE;
 	}
 	for(vindex=0; vindex<acc_dregion_fprivate.size(); vindex++)
 	{
@@ -10066,6 +10113,7 @@ static void ACC_Process_scalar_variable_for_offload_region()
 		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_IN;
 		pVarInfo->st_var = st_var;
 		pVarInfo->is_reduction = FALSE;
+		pVarInfo->is_across_gangs = FALSE;
 	}
 	for(vindex=0; vindex<acc_dregion_private.size(); vindex++)
 	{
@@ -10081,6 +10129,7 @@ static void ACC_Process_scalar_variable_for_offload_region()
 		pVarInfo->acc_scalar_type = ACC_SCALAR_VAR_PRIVATE;
 		pVarInfo->st_var = st_var;
 		pVarInfo->is_reduction = FALSE;
+		pVarInfo->is_across_gangs = FALSE;
 	}
 	//acc_dregion_private;		
 	//acc_dregion_fprivate;	
@@ -15232,7 +15281,7 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_ma
 					0, st_mySum, ST_type(st_mySum));
 
 	
-	sprintf ( localname, "is_power2");
+	/*sprintf ( localname, "is_power2");
 	ST* st_IsPow2 = New_ST( CURRENT_SYMTAB );
 	ST_Init(st_IsPow2,
 			Save_Str("is_power2"),
@@ -15241,7 +15290,7 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_ma
 			EXPORT_LOCAL,
 			Be_Type_Tbl(MTYPE_U4));
 	WN* wn_IsPow2 = WN_Ldid(TY_mtype(ST_type(st_IsPow2)), 
-					0, st_IsPow2, ST_type(st_IsPow2));
+					0, st_IsPow2, ST_type(st_IsPow2));*/
 	
 	
 	//Set up predefined variable in CUDA
@@ -15275,16 +15324,16 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_ma
 	
 	//load parameter: num of element
 	WN* wn_num_elem = WN_Ldid(TY_mtype(ST_type(st_num_elem)), 0, st_num_elem, ST_type(st_num_elem));
-	WN* InitIsPow2 = WN_Binary(OPR_SUB, TY_mtype(ST_type(st_num_elem)), WN_COPY_Tree(wn_num_elem), 
-								WN_Intconst(TY_mtype(ST_type(st_num_elem)), 1));
+	//WN* InitIsPow2 = WN_Binary(OPR_SUB, TY_mtype(ST_type(st_num_elem)), WN_COPY_Tree(wn_num_elem), 
+	//							WN_Intconst(TY_mtype(ST_type(st_num_elem)), 1));
 	
-	InitIsPow2 = WN_Binary(OPR_BAND, TY_mtype(ST_type(st_IsPow2)), 
-								WN_COPY_Tree(wn_num_elem), InitIsPow2);
-	InitIsPow2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_IsPow2)), 
-						InitIsPow2, WN_Intconst(TY_mtype(ST_type(st_IsPow2)),0));
-	InitIsPow2 = WN_Stid(TY_mtype(ST_type(st_IsPow2)), 0, st_IsPow2, 
-									ST_type(st_IsPow2), InitIsPow2);	
-	WN_INSERT_BlockLast( acc_reduction_func,  InitIsPow2);
+	//InitIsPow2 = WN_Binary(OPR_BAND, TY_mtype(ST_type(st_IsPow2)), 
+	//							WN_COPY_Tree(wn_num_elem), InitIsPow2);
+	//InitIsPow2 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_IsPow2)), 
+	//					InitIsPow2, WN_Intconst(TY_mtype(ST_type(st_IsPow2)),0));
+	//InitIsPow2 = WN_Stid(TY_mtype(ST_type(st_IsPow2)), 0, st_IsPow2, 
+	//								ST_type(st_IsPow2), InitIsPow2);	
+	//WN_INSERT_BlockLast( acc_reduction_func,  InitIsPow2);
 
 	
 	WN* Init0 = WN_Stid(TY_mtype(ST_type(st_tid)), 0, st_tid, ST_type(st_tid), WN_COPY_Tree(wn_threadidx));
@@ -15314,14 +15363,14 @@ static ST* ACC_GenerateReduction_Kernels_TopLoop(ACC_ReductionMap* pReduction_ma
 								WN_COPY_Tree(wn_loop_index), 
 								WN_COPY_Tree(wn_num_elem));
 	//while body
-	WN* wn_IfTest1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_IsPow2)), 
-								WN_COPY_Tree(wn_IsPow2), 
-								WN_Intconst(MTYPE_U4, 1));
+	//WN* wn_IfTest1 = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_IsPow2)), 
+	//							WN_COPY_Tree(wn_IsPow2), 
+	//							WN_Intconst(MTYPE_U4, 1));
 	Init0 = WN_Binary(OPR_ADD, TY_mtype(ST_type(st_loop_index)), 
 						WN_COPY_Tree(wn_loop_index), WN_COPY_Tree(wn_blocksize));
 	WN* wn_IfTest2 = WN_Relational (OPR_LT, TY_mtype(ST_type(st_loop_index)), 
 						Init0, WN_COPY_Tree(wn_num_elem));
-	WN* wn_IfCombinedTest = WN_Binary (OPR_CIOR, Boolean_type, wn_IfTest1, wn_IfTest2);
+	WN* wn_IfCombinedTest = wn_IfTest2;//WN_Binary (OPR_CIOR, Boolean_type, wn_IfTest1, wn_IfTest2);
 	//WN_Relational (OPR_CIOR, TY_mtype(ST_type(st_loop_index)), WN_COPY_Tree(wn_loop_index), WN_COPY_Tree(wn_num_elem));
 	//WN* tree = WN_Istore(TY_mtype(TY_pointed(ST_type(w->new_st))), 0, ST_type(w->new_st), wn_ptrLoc, WN_kid(tree, 0));
 	//WN* tree = WN_Iload(TY_mtype(TY_pointed(ST_type(w->new_st))), 0,  TY_pointed(ST_type(w->new_st)), wn_ptrLoc);
