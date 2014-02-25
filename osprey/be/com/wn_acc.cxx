@@ -10145,8 +10145,9 @@ static ST* ACC_GenSingleCreateAndMallocDeviceMem(ACC_DREGION__ENTRY dEntry,
 	WN_OFFSET old_offset = WN_offsetx(dclause);		
     TY_IDX ty = ST_type(old_st);
     TY_KIND kind = TY_kind(ty);//ST_name(old_st)
-    char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
-	sprintf ( localname, "__device_%s", ST_name(old_st) );
+    char* localname = (char *) alloca(strlen(ST_name(old_st))+35);
+    sprintf ( localname, "__device_%s_%d", ST_name(old_st), acc_reg_tmp_count);
+    acc_reg_tmp_count++;
 	
 	if (kind == KIND_ARRAY|| kind == KIND_POINTER)
 	{
@@ -10235,8 +10236,9 @@ static ST* ACC_GenDeclareSingleDeviceMem(ACC_DREGION__ENTRY dentry,
 	WN_OFFSET old_offset = WN_offsetx(l);		
     TY_IDX ty = ST_type(old_st);
     TY_KIND kind = TY_kind(ty);//ST_name(old_st)
-    char* localname = (char *) alloca(strlen(ST_name(old_st))+10);
-	sprintf ( localname, "__device_%s", ST_name(old_st) );
+    char* localname = (char *) alloca(strlen(ST_name(old_st))+35);
+	sprintf ( localname, "__device_%s_%d", ST_name(old_st), acc_reg_tmp_count);
+    acc_reg_tmp_count ++;
 	
 	if (kind == KIND_ARRAY|| kind == KIND_POINTER)
 	{
@@ -10396,6 +10398,7 @@ static void ACC_GenDeviceCreateCopyInOut(vector<ACC_DREGION__ENTRY>* pDREntries,
 	  WN_OFFSET old_offset = WN_offsetx(dClause);
  	  WN* thenblock = WN_CreateBlock();
  	  WN* elseblock = WN_CreateBlock();
+	  WN* wn_h2d;
 	  PREG_NUM rreg1, rreg2;	/* Pregs with I4 return values */;
 	  //call is present function to check whether it has already been created.
       WN_INSERT_BlockLast( ReplacementBlock, ACC_GenIsPCreate(dentry));
@@ -10412,14 +10415,17 @@ static void ACC_GenDeviceCreateCopyInOut(vector<ACC_DREGION__ENTRY>* pDREntries,
 	  WN* test = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_is_pcreate)), 
 	  								temp_node, WN_Intconst(MTYPE_I4, 0));
 	  ST* st_dMem = ACC_GenSingleCreateAndMallocDeviceMem(dentry, pDMap, thenblock);
-	  if(MemIn)
-	  {
-	  	WN* wn_h2d = Gen_DataH2D(old_st, st_dMem, WN_COPY_Tree(wnSize), WN_COPY_Tree(wnStart));
-		WN_INSERT_BlockLast(thenblock, wn_h2d);		
-	  }
+	  WN* wn_GetDeviceAddr = ACC_Gen_GetDeviceAddr(dentry, st_dMem);
+	  WN_INSERT_BlockLast(elseblock, wn_GetDeviceAddr);
 	  WN* ifexp = WN_CreateIf(test, thenblock, elseblock);
 	  
 	  WN_INSERT_BlockLast(ReplacementBlock, ifexp);
+	  if(MemIn)
+          {     
+                wn_h2d = Gen_DataH2D(old_st, st_dMem, WN_COPY_Tree(wnSize), WN_COPY_Tree(wnStart));
+                WN_INSERT_BlockLast(ReplacementBlock, wn_h2d);                 
+          }
+	  
 	}
 }
 

@@ -133,6 +133,9 @@ boolean compiling_acc_s2s = FALSE;
 boolean compiling_cuda = FALSE; //if it is true, uhcc will call nvcc to compile the cuda into ptx code
 char* nvcc_cmd = NULL;
 char* nvcc_path = NULL;
+char* native_cmd = NULL;
+char* native_flags = NULL;
+char* native_path = NULL;
 
 extern void turn_down_opt_level (int new_olevel, char *msg);
 
@@ -1453,7 +1456,45 @@ add_file_args (string_list_t *args, phases_t index)
 		    add_string (args, "-cmds");
 		    append_string_lists (args, ipl_cmds);
 		}
-		break; 
+		break;
+	case P_nativecc:
+		if(native_flags != NULL)
+                {
+                        temp = native_flags;
+                        while(temp)
+                        {
+                                char* newloc = strchr(temp, ',');
+                                if(newloc)
+                                {
+                                        *newloc = '\0';
+                                        newloc ++;
+                                }
+                                sprintf (buf, "%s", temp);
+                                temp = newloc;
+                                add_string(args, buf);
+                        }
+                }
+		{
+			char* pname = strdup(the_file);
+			int index;
+			for ( index=strlen(pname)-1; index>=0; index-- )
+                        {
+                            if ( pname[index] == '/' ) break;   /* Don't touch directory prefixes */
+                            if ( pname[index] == '.' )
+                                {
+                              pname[index] = 0;
+                              break;
+                            }
+                        }
+                        temp = pname;
+			sprintf (buf, "%s.w2c.c", temp);
+			add_string(args, buf);
+			add_string(args, "-o");
+			sprintf (buf, "%s.o", temp);
+			add_string(args, buf);
+		}
+		break;	
+
 	case P_nvcc:	
 		if(nvcc_cmd != NULL)
 		{
@@ -3536,6 +3577,20 @@ run_compiler (int argc, char *argv[])
 			      		break;
 			    	    }
 		  		}
+				if(compiling_acc_s2s)
+				{
+					string_list_t *nacc_args;
+					sprintf(buf, "%s.w2c.c", pname);
+                                	file = fopen(buf, "r");
+					if(file != NULL && native_path && native_cmd && native_flags)
+					{
+						fclose(file);
+						char* full_native_path = concat_strings(native_path, native_cmd);
+						nacc_args = init_string_list();
+						add_file_args (nacc_args, P_nativecc);
+						run_phase (P_nativecc, full_native_path, nacc_args);
+					}
+				}
 				sprintf(buf, "%s.w2c.cu", pname);
 				file = fopen(buf, "r");
 				if(file != NULL)

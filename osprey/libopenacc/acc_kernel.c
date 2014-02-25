@@ -31,32 +31,50 @@ void __accr_set_vectors(int x, int y, int z)
 
 void __accr_set_gang_num_x(int x)
 {
-	gangs[0] = x;
+	if(x==0)
+		gangs[0] = 1;
+	else
+		gangs[0] = x;
 }
 
 void __accr_set_gang_num_y(int y)
 {
-	gangs[1] = y;
+	if(y==0)
+		gangs[1] = 1;
+	else
+		gangs[1] = y;
 }
 
 void __accr_set_gang_num_z(int z)
 {
-	gangs[2] = z;
+	if(z==0)
+		gangs[2] = 1;
+	else
+		gangs[2] = z;
 }
 
 void __accr_set_vector_num_x(int x)
 {
-	vectors[0] = x;
+	if(x==0)
+		vectors[0] = 32;
+	else
+		vectors[0] = x;
 }
 
 void __accr_set_vector_num_y(int y)
 {
-	vectors[1] = y;
+	if(y == 0)
+		vectors[1] = 1;
+	else
+		vectors[1] = y;
 }
 
 void __accr_set_vector_num_z(int z)
 {
-	vectors[2] = z;
+	if(z == 0)
+		vectors[2] = 1;
+	else
+		vectors[2] = z;
 }
 
 void __accr_set_default_gang_vector(void)

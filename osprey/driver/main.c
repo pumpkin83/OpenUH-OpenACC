@@ -147,6 +147,9 @@ extern boolean compiling_acc_s2s;
 extern boolean compiling_cuda; //if it is true, uhcc will call nvcc to compile the cuda into ptx code
 extern char* nvcc_cmd;
 extern char* nvcc_path;
+extern char* native_cmd;
+extern char* native_flags;
+extern char* native_path;
 
 static void check_openacc_flags(int argc, char **argv)
 {
@@ -160,6 +163,19 @@ static void check_openacc_flags(int argc, char **argv)
 				compiling_acc = TRUE;
 			else if(!strcmp(argv[i], "-s2s"))
 				compiling_acc_s2s = TRUE;
+			else if(!strncmp(argv[i], "-nacmd=", 7))
+			{
+				//native compiler command: uhcc, gcc, etc.
+				native_cmd = argv[i] + 7;
+			}
+			else if(!strncmp(argv[i], "-naflags=", 9))
+			{
+				native_flags = argv[i] + 9;
+			}
+			else if(!strncmp(argv[i], "-napath=", 8))
+			{
+				native_path = argv[i] + 8;
+			}
 			else if(!strncmp(argv[i], "-nvcc", 5))
 			{
 				compiling_cuda = TRUE;
@@ -284,6 +300,11 @@ main (int argc, char *argv[])
 		{
 			i++;
 		  	continue;
+		}
+		else if(!strncmp(argv[i], "-nacmd", 6) || !strncmp(argv[i], "-naflags", 8) || !strncmp(argv[i], "-napath", 7))
+		{
+			i++;
+			continue;
 		}
 
 		set_current_arg_pos(i);
