@@ -27,7 +27,7 @@
 
 #include "acc_hashmap.h"
 
-#define HM_INITIAL_CAPACITY 16
+#define HM_INITIAL_CAPACITY 64
 #define HM_LOAD_FACTOR 0.75
 #define HM_MAXIMUM_CAPACITY (1<<30)
 

@@ -155,3 +155,8 @@ extern void acc_shutdown(acc_device_t);
 extern void* acc_malloc(unsigned int);
 
 extern void acc_free(void*);
+
+extern void __acc_stack_push();
+extern void __acc_stack_pop();
+extern void __acc_stack_pending_to_current_stack(void* pdevice);
+extern void __acc_stack_clear_device_ptr_in_current_stack();

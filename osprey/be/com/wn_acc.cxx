@@ -251,7 +251,11 @@ typedef enum {
 	ACCR_GET_TOTAL_GANGS_WORKERS = 41,
 	ACCR_CALL_LOCAL_REDUCTION	= 42,
 	ACCR_DYNAMIC_LAUNCH_KERNEL	= 43,
-	ACCRUNTIME_LAST 		= ACCR_DYNAMIC_LAUNCH_KERNEL
+	ACCR_STACK_PUSH			= 44,
+	ACCR_STACK_POP			= 45,
+	ACCR_STACK_PENDING_TO_CURRENT_STACK = 46,
+	ACCR_STACK_CLEAR_DEVICE_PTR_IN_CURRENT_STACK = 47,
+	ACCRUNTIME_LAST 		= ACCR_STACK_CLEAR_DEVICE_PTR_IN_CURRENT_STACK
 } OACCRUNTIME;
 
 static const char *accr_names [ACCRUNTIME_LAST + 1] = {
@@ -298,7 +302,11 @@ static const char *accr_names [ACCRUNTIME_LAST + 1] = {
   "__accr_get_total_num_gangs",
   "__accr_get_total_gangs_workers",
   "__accr_call_local_reduction",
-  "__accr_dynamic_launch_kernel"
+  "__accr_dynamic_launch_kernel",
+  "__acc_stack_push",
+  "__acc_stack_pop",
+  "__acc_stack_pending_to_current_stack",
+  "__acc_stack_clear_device_ptr_in_current_stack"
 };
 
 
@@ -350,7 +358,11 @@ static ST_IDX accr_sts [ACCRUNTIME_LAST + 1] = {
   ST_IDX_ZERO,   /*ACCR_GET_TOTAL_GANGS*/
   ST_IDX_ZERO,	/*ACCR_GET_TOTAL_GANGS_WORKERS*/
   ST_IDX_ZERO,	/*ACCR_CALL_LOCAL_REDUCTION*/
-  ST_IDX_ZERO	/*ACCR_DYNAMIC_LAUNCH_KERNEL*/
+  ST_IDX_ZERO,	/*ACCR_DYNAMIC_LAUNCH_KERNEL*/
+  ST_IDX_ZERO,  /*ACCR_STACK_PUSH*/
+  ST_IDX_ZERO,  /*ACCR_STACK_POP*/
+  ST_IDX_ZERO,  /*ACCR_STACK_PENDING_TO_CURRENT_STACK*/
+  ST_IDX_ZERO   /*ACCR_STACK_CLEAR_DEVICE_PTR_IN_CURRENT_STACK*/
 };
 
 
@@ -9715,6 +9727,78 @@ static WN *LaunchKernel (int index, WN* wn_replace_block, BOOL bParallel)
 	return wn;
 }
 
+static WN* Gen_ACC_Stack_Push()
+{
+  WN * wn;
+  wn = WN_Create(OPC_VCALL, 0 );
+  WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_STACK_PUSH);
+
+  WN_Set_Call_Non_Data_Mod(wn);
+  WN_Set_Call_Non_Data_Ref(wn);
+  WN_Set_Call_Non_Parm_Mod(wn);
+  WN_Set_Call_Non_Parm_Ref(wn);
+  WN_Set_Call_Parm_Ref(wn);
+  WN_linenum(wn) = acc_line_number;
+
+  return wn;
+}
+
+static WN* Gen_ACC_Stack_Pop()
+{
+  WN * wn;
+  wn = WN_Create(OPC_VCALL, 0 );
+  WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_STACK_POP);
+
+  WN_Set_Call_Non_Data_Mod(wn);
+  WN_Set_Call_Non_Data_Ref(wn);
+  WN_Set_Call_Non_Parm_Mod(wn);
+  WN_Set_Call_Non_Parm_Ref(wn);
+  WN_Set_Call_Parm_Ref(wn);
+  WN_linenum(wn) = acc_line_number;
+
+  return wn;
+}
+
+static WN* Gen_ACC_Free_Device_Ptr_InCurrentStack()
+{
+  WN * wn;
+  wn = WN_Create(OPC_VCALL, 0 );
+  WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_STACK_CLEAR_DEVICE_PTR_IN_CURRENT_STACK);
+
+  WN_Set_Call_Non_Data_Mod(wn);
+  WN_Set_Call_Non_Data_Ref(wn);
+  WN_Set_Call_Non_Parm_Mod(wn);
+  WN_Set_Call_Non_Parm_Ref(wn);
+  WN_Set_Call_Parm_Ref(wn);
+  WN_linenum(wn) = acc_line_number;
+
+  return wn;
+}
+
+
+static WN *
+Gen_ACC_Pending_DevicePtr_To_Current_Stack(ST *st_dmem) 
+{
+	WN * wn;
+	WN* wnx;
+	wn = WN_Create(OPC_VCALL, 1);	
+	WN_st_idx(wn) = GET_ACCRUNTIME_ST(ACCR_STACK_PENDING_TO_CURRENT_STACK);
+  
+	WN_Set_Call_Non_Data_Mod(wn);
+	WN_Set_Call_Non_Data_Ref(wn);
+	WN_Set_Call_Non_Parm_Mod(wn);
+	WN_Set_Call_Non_Parm_Ref(wn);
+	WN_Set_Call_Parm_Ref(wn);
+	
+	wnx = WN_Ldid(Pointer_type, 0, st_dmem, ST_type(st_dmem));
+	WN_kid(wn, 0) = WN_CreateParm(Pointer_type, wnx, 
+						 WN_ty(wnx), WN_PARM_BY_VALUE);
+
+	
+  	return wn;
+}
+
+
 static ST * st_is_pcreate;
 static WN_OFFSET ofst_st_is_pcreate;
 static BOOL is_pcreate_tmp_created = FALSE;
@@ -10414,18 +10498,21 @@ static void ACC_GenDeviceCreateCopyInOut(vector<ACC_DREGION__ENTRY>* pDREntries,
 	  temp_node = WN_Ldid(TY_mtype(ST_type(st_is_pcreate)), 0, st_is_pcreate, ST_type(st_is_pcreate));	  	
 	  WN* test = WN_Relational (OPR_EQ, TY_mtype(ST_type(st_is_pcreate)), 
 	  								temp_node, WN_Intconst(MTYPE_I4, 0));
+	  //then block
 	  ST* st_dMem = ACC_GenSingleCreateAndMallocDeviceMem(dentry, pDMap, thenblock);
+          WN* wn_pending_new_ptr = Gen_ACC_Pending_DevicePtr_To_Current_Stack(st_dMem);
+	  WN_INSERT_BlockLast(thenblock, wn_pending_new_ptr);
+	  if(MemIn)
+          {
+                wn_h2d = Gen_DataH2D(old_st, st_dMem, WN_COPY_Tree(wnSize), WN_COPY_Tree(wnStart));
+                WN_INSERT_BlockLast(thenblock, wn_h2d);
+          }
+          //else block
 	  WN* wn_GetDeviceAddr = ACC_Gen_GetDeviceAddr(dentry, st_dMem);
 	  WN_INSERT_BlockLast(elseblock, wn_GetDeviceAddr);
 	  WN* ifexp = WN_CreateIf(test, thenblock, elseblock);
 	  
 	  WN_INSERT_BlockLast(ReplacementBlock, ifexp);
-	  if(MemIn)
-          {     
-                wn_h2d = Gen_DataH2D(old_st, st_dMem, WN_COPY_Tree(wnSize), WN_COPY_Tree(wnStart));
-                WN_INSERT_BlockLast(ReplacementBlock, wn_h2d);                 
-          }
-	  
 	}
 }
 
@@ -11508,8 +11595,9 @@ static ST* ACC_Create_Single_Scalar_Variable(ST* st_var, ACC_SCALAR_VAR_INFO* pI
 		//ST* st_var = acc_scalar_inout_nodes[i];
 		TY_IDX ty_var = ST_type(st_var);
 		UINT32 ty_size = TY_size(ty_var);
-	    char* localname = (char *) alloca(strlen(ST_name(st_var))+15);
-		sprintf ( localname, "__device_%s", ST_name(st_var));
+	    char* localname = (char *) alloca(strlen(ST_name(st_var))+35);
+		sprintf ( localname, "__device_%s_%d", ST_name(st_var), acc_reg_tmp_count);
+		acc_reg_tmp_count ++;
 		
 		TY_IDX ty_p = Make_Pointer_Type(ty_var);
 		ST * karg = NULL;
@@ -11684,6 +11772,8 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	WN* kernelsBlock = WN_CreateBlock();
 	acc_reduction_count = 0;
 	//ignore if, present, deviceptr clauses
+	WN* wn_acc_stack_op = Gen_ACC_Stack_Push();
+	WN_INSERT_BlockLast(kernelsBlock, wn_acc_stack_op);
 	kernelsRegionInfo.acc_if_node = acc_if_node;
 	//sDRegionInfo.acc_copy_nodes = acc_copy_nodes; 	  /* Points to (optional) copy nodes */
 	//sDRegionInfo.acc_copyin_nodes = acc_copyin_nodes;   /* Points to (optional) copyin nodes */
@@ -11857,14 +11947,18 @@ static WN* ACC_Process_KernelsRegion( WN * tree, WN* wn_cont)
 	//acc_map_scalar_out.clear();
 	/****************************************************************************/
 	//Free device memory
-	if(kernelsRegionInfo.acc_present_or_copyin_nodes)
+	/*if(kernelsRegionInfo.acc_present_or_copyin_nodes)
 		ACC_GenDeviceMemFreeInBatch(&kernelsRegionInfo.pcopyinMap, kernelsBlock);
 	if(kernelsRegionInfo.acc_present_or_copyout_nodes)
 		ACC_GenDeviceMemFreeInBatch(&kernelsRegionInfo.pcopyoutMap, kernelsBlock);
 	if(kernelsRegionInfo.acc_present_or_copy_nodes)
 		ACC_GenDeviceMemFreeInBatch(&kernelsRegionInfo.pcopyMap, kernelsBlock);
 	if(kernelsRegionInfo.acc_present_or_create_nodes)
-		ACC_GenDeviceMemFreeInBatch(&kernelsRegionInfo.pcreateMap, kernelsBlock);
+		ACC_GenDeviceMemFreeInBatch(&kernelsRegionInfo.pcreateMap, kernelsBlock);*/
+	wn_acc_stack_op = Gen_ACC_Free_Device_Ptr_InCurrentStack();
+	WN_INSERT_BlockLast(kernelsBlock, wn_acc_stack_op);
+        wn_acc_stack_op = Gen_ACC_Stack_Pop();
+	WN_INSERT_BlockLast(kernelsBlock, wn_acc_stack_op);
 	return kernelsBlock;
 }
 
@@ -12039,9 +12133,11 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 {
 	ParallelRegionInfo parallelRegionInfo;
 	WN* wn;
-	
+        	
 	WN* parallelBlock = WN_CreateBlock();
 	//ignore if, present, deviceptr clauses
+	WN* wn_acc_stack_op = Gen_ACC_Stack_Push();
+	WN_INSERT_BlockLast(parallelBlock, wn_acc_stack_op);
 	parallelRegionInfo.acc_if_node = acc_if_node;
 	//sDRegionInfo.acc_copy_nodes = acc_copy_nodes; 	  /* Points to (optional) copy nodes */
 	//sDRegionInfo.acc_copyin_nodes = acc_copyin_nodes;   /* Points to (optional) copyin nodes */
@@ -12210,14 +12306,18 @@ static WN* ACC_Process_ParallelRegion( WN * tree, WN* wn_cont)
 	
 	/****************************************************************************/
 	//Free device memory
-	if(parallelRegionInfo.acc_present_or_copyin_nodes)
+	/*if(parallelRegionInfo.acc_present_or_copyin_nodes)
 		ACC_GenDeviceMemFreeInBatch(&parallelRegionInfo.pcopyinMap, parallelBlock);
 	if(parallelRegionInfo.acc_present_or_copyout_nodes)
 		ACC_GenDeviceMemFreeInBatch(&parallelRegionInfo.pcopyoutMap, parallelBlock);
 	if(parallelRegionInfo.acc_present_or_copy_nodes)
 		ACC_GenDeviceMemFreeInBatch(&parallelRegionInfo.pcopyMap, parallelBlock);
 	if(parallelRegionInfo.acc_present_or_create_nodes)
-		ACC_GenDeviceMemFreeInBatch(&parallelRegionInfo.pcreateMap, parallelBlock);
+		ACC_GenDeviceMemFreeInBatch(&parallelRegionInfo.pcreateMap, parallelBlock);*/
+	wn_acc_stack_op = Gen_ACC_Free_Device_Ptr_InCurrentStack();
+	WN_INSERT_BlockLast(parallelBlock, wn_acc_stack_op);
+	wn_acc_stack_op = Gen_ACC_Stack_Pop();
+	WN_INSERT_BlockLast(parallelBlock, wn_acc_stack_op);
 	return parallelBlock;
 }
 
@@ -12342,6 +12442,8 @@ static WN* ACC_Process_DataRegion( WN * tree )
   WN* wn_stmt_block;// = WN_region_body(node);
   WN* cur_node, *next_node, *prev_node;
   WN* DRegion_replacement_block = WN_CreateBlock();
+  WN* wn_acc_stack_op = Gen_ACC_Stack_Push();
+  WN_INSERT_BlockLast(DRegion_replacement_block, wn_acc_stack_op);
   //acc_loopinfo.acc_forloop
   SingleDRegionInfo sDRegionInfo = 
   					acc_nested_dregion_info.DRegionInfo[acc_nested_dregion_info.Depth - 1];
@@ -12565,20 +12667,24 @@ static WN* ACC_Process_DataRegion( WN * tree )
 	}
   }
   
-  if(sDRegionInfo.acc_present_or_copyout_nodes)
-  	ACC_GenDataCopyOut(&sDRegionInfo.pcopyoutMap, DRegion_replacement_block);
-  if(sDRegionInfo.acc_present_or_copy_nodes)
-  	ACC_GenDataCopyOut(&sDRegionInfo.pcopyMap, DRegion_replacement_block);
+  //if(sDRegionInfo.acc_present_or_copyout_nodes)
+  //	ACC_GenDataCopyOut(&sDRegionInfo.pcopyoutMap, DRegion_replacement_block);
+  //if(sDRegionInfo.acc_present_or_copy_nodes)
+  //	ACC_GenDataCopyOut(&sDRegionInfo.pcopyMap, DRegion_replacement_block);
   /****************************************************************************/
   //Free device memory
-  if(sDRegionInfo.acc_present_or_copyin_nodes)
+  /*if(sDRegionInfo.acc_present_or_copyin_nodes)
   	ACC_GenDeviceMemFreeInBatch(&sDRegionInfo.pcopyinMap, DRegion_replacement_block);
   if(sDRegionInfo.acc_present_or_copyout_nodes)
   	ACC_GenDeviceMemFreeInBatch(&sDRegionInfo.pcopyoutMap, DRegion_replacement_block);
   if(sDRegionInfo.acc_present_or_copy_nodes)
   	ACC_GenDeviceMemFreeInBatch(&sDRegionInfo.pcopyMap, DRegion_replacement_block);
   if(sDRegionInfo.acc_present_or_create_nodes)
-  	ACC_GenDeviceMemFreeInBatch(&sDRegionInfo.pcreateMap, DRegion_replacement_block);
+  	ACC_GenDeviceMemFreeInBatch(&sDRegionInfo.pcreateMap, DRegion_replacement_block);*/
+  wn_acc_stack_op = Gen_ACC_Free_Device_Ptr_InCurrentStack();
+  WN_INSERT_BlockLast(DRegion_replacement_block, wn_acc_stack_op);
+  wn_acc_stack_op = Gen_ACC_Stack_Pop();
+  WN_INSERT_BlockLast(DRegion_replacement_block, wn_acc_stack_op);
   acc_region_num ++;
   acc_construct_num = 0;
   
