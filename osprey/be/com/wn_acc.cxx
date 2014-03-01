@@ -1014,7 +1014,7 @@ static ST* ACC_GenerateWorkerReduction_rolling(ACC_ReductionMap* pReduction_map)
 static WN* Gen_Sync_Threads();
 static WN* ACC_GenFreeDeviceMemory(ST* st_device_mem);
 static WN* ACC_Get_Init_Value_of_Reduction(OPERATOR ReductionOpr, TYPE_ID rtype);
-
+static void acc_dump_scalar_management_tab();
 
 
 /*
@@ -2333,6 +2333,8 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 		//Scalar variables in
 		else if (kind == KIND_SCALAR)// && acc_kernelLaunchParamList[i].st_device == NULL)
 		{
+			if(acc_offload_scalar_management_tab.find(old_st) == acc_offload_scalar_management_tab.end())
+                                         Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
 			ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[old_st];
 			TY_IDX ty_param;
 			ST* st_param;
@@ -2428,10 +2430,15 @@ static void Create_kernel_parameters_ST(WN* kparamlist, BOOL isParallel)
 				//it is in the caller function ST.
 				//ST* st_device = reductionmap.deviceName;
 				ST* st_host = reductionmap.hostName;
+				if(acc_offload_scalar_management_tab.find(st_host) == acc_offload_scalar_management_tab.end())
+					Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
 				ACC_SCALAR_VAR_INFO* pVarInfo = acc_offload_scalar_management_tab[st_host];
 				////////////////////////////////////////////////////////////////////////////
 				if(!pVarInfo)
+				{
+					acc_dump_scalar_management_tab();
 					Fail_FmtAssertion("cannot find var in acc_offload_scalar_management_tab.");
+				}
 				else if(pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_PRIVATE 
 					|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_IN 
 					|| pVarInfo->acc_scalar_type ==ACC_SCALAR_VAR_OUT)
@@ -8078,8 +8085,7 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 				iRdIdx ++;
 			}
 		}
-		else if(acc_loopinfo.loopnum == 2
-				&& acc_loopinfo.acc_forloop[0].reductionmap.size())
+		else if(acc_loopinfo.loopnum == 2)
 		{
 			iRdIdx = 0;
 			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
@@ -8284,8 +8290,7 @@ static void ACC_ProcessReduction_Parallel(ParallelRegionInfo* pPRInfo, WN* wn_re
 				iRdIdx ++;
 			}
 		}
-		else if(acc_loopinfo.loopnum == 1 
-				&& acc_loopinfo.acc_forloop[0].reductionmap.size())
+		else if(acc_loopinfo.loopnum == 1)
 		{
 			iRdIdx = 0;
 			while(iRdIdx<acc_loopinfo.acc_forloop[0].reductionmap.size())
@@ -10572,6 +10577,18 @@ lower_acc ( WN * block, WN * node, LOWER_ACTIONS actions )
 	WN_Delete (wn_replace_block );
     
     return (return_nodes);
+}
+
+static void acc_dump_scalar_management_tab()
+{
+	printf("size : %d\n", acc_offload_scalar_management_tab.size());
+	map<ST*, ACC_SCALAR_VAR_INFO*>::iterator itor = acc_offload_scalar_management_tab.begin();
+	for(; itor!=acc_offload_scalar_management_tab.end(); itor++)
+	{
+		ACC_SCALAR_VAR_INFO* pVarInfo = itor->second;
+		ST* st_host = itor->first;
+		printf("ST_name:%s. \n", ST_name(pVarInfo->st_var));
+	}
 }
 
 static void ACC_Process_scalar_variable_for_offload_region()
@@ -13331,6 +13348,7 @@ static char* ACC_Get_LoopTypeName_of_Reduction(ACC_LOOP_TYPE looptype)
 		return "vector";
 	case ACC_WORKER_VECTOR:  	
 		return "worker_vector";
+	case ACC_NONE_SPECIFIED:
 	case ACC_GANG_WORKER_VECTOR:
 		if(acc_reduction_mem == ACC_RD_SHARED_MEM)	 	
 			return "worker_vector";

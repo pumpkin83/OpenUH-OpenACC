@@ -84,7 +84,7 @@ void __accr_set_default_gang_vector(void)
 	gangs[2] = 1;
 
 	vectors[0] = 128;
-	vectors[1] = 8;
+	vectors[1] = 1;
 	vectors[2] = 1;
 	
 	DEBUG(("Set gangs: %d, %d, %d", gangs[0], gangs[1], gangs[2]));

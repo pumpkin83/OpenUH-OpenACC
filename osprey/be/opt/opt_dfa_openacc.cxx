@@ -283,6 +283,8 @@ void free_dfa_resource_openacc()
 	//	delete acc_var_table[i];
 	//}
 	acc_var_table.clear();
+        acc_vars.clear();
+	acc_prescan_vars.clear();
 	//acc_label_bbid.clear();	// region exit belongs to which bbid
     //acc_start_end_bbid.clear();
 	acc_used_data_classify.clear();
