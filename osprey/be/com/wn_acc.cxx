@@ -13128,10 +13128,10 @@ static WN* ACC_Process_DataRegion( WN * tree )
 	}
   }
   
-  //if(sDRegionInfo.acc_present_or_copyout_nodes)
-  //	ACC_GenDataCopyOut(&sDRegionInfo.pcopyoutMap, DRegion_replacement_block);
-  //if(sDRegionInfo.acc_present_or_copy_nodes)
-  //	ACC_GenDataCopyOut(&sDRegionInfo.pcopyMap, DRegion_replacement_block);
+  if(sDRegionInfo.acc_present_or_copyout_nodes)
+  	ACC_GenDataCopyOut(&sDRegionInfo.pcopyoutMap, DRegion_replacement_block);
+  if(sDRegionInfo.acc_present_or_copy_nodes)
+  	ACC_GenDataCopyOut(&sDRegionInfo.pcopyMap, DRegion_replacement_block);
   /****************************************************************************/
   //Free device memory
   /*if(sDRegionInfo.acc_present_or_copyin_nodes)
