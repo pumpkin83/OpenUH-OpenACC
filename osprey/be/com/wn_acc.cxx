@@ -9960,7 +9960,7 @@ ACC_Walk_and_Localize (WN * tree)
 	int ii = 0;
 	WN* wn_offset = NULL;
 	WN* wn_base = WN_array_base(tree) ;
-	WN* wn_dimInOne = NULL;;
+	//WN* wn_dimInOne = NULL;;
     old_sym = WN_st(wn_base);
 	ST* new_sym = NULL;
 	UINT32 esize = WN_element_size(tree);
@@ -9978,6 +9978,10 @@ ACC_Walk_and_Localize (WN * tree)
 		//WN_array_index(x, i)
 		if(new_sym)
 		{
+			WN* wn_ldidbase = WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
+			TYPE_ID mtype_base_id = WN_rtype(wn_ldidbase);
+			///////////////////////////////////////////////////////////////////////
+			//begin translation
 			for(ii=0; ii<idim-1; ii++)
 			{
 				WN* wn_index = WN_array_index(tree, ii);
@@ -9991,20 +9995,28 @@ ACC_Walk_and_Localize (WN * tree)
 				while(iii<idim-1)
 				{
 					WN* wn_dim = WN_array_dim(tree, iii+1);
+					if(WN_rtype(wn_dim) != mtype_base_id)
+					{
+						wn_dim = WN_Integer_Cast(WN_COPY_Tree(wn_dim), mtype_base_id, WN_rtype(wn_dim));
+					}
+					if(WN_rtype(wn_index) != mtype_base_id)
+                                        {
+                                                wn_index = WN_Integer_Cast(WN_COPY_Tree(wn_index), mtype_base_id, WN_rtype(wn_index));
+                                        }
 			   		wn_index = WN_Binary(OPR_MPY, 
-			   						WN_rtype(wn_index), 
+			   						mtype_base_id, 
 			   						wn_index, 
-			   						WN_COPY_Tree(wn_dim));
+			   						wn_dim);
 					iii ++;
 				}
 				if(wn_offset)
 		   			wn_offset = WN_Binary(OPR_ADD, 
-			   					WN_rtype(wn_index), 
+			   					mtype_base_id, 
 		   						wn_offset, 
-		   						WN_COPY_Tree(wn_index));
+		   						wn_index);
 				else
 					wn_offset = wn_index;
-				if(wn_dimInOne == NULL)
+				/*if(wn_dimInOne == NULL)
 					wn_dimInOne = WN_Binary(OPR_MPY, 
 			   					WN_rtype(wn_index), 
 			   						WN_COPY_Tree(WN_array_dim(tree, ii)), 
@@ -10013,27 +10025,32 @@ ACC_Walk_and_Localize (WN * tree)
 					wn_dimInOne = WN_Binary(OPR_MPY, 
 			   					WN_rtype(wn_index), 
 			   						wn_dimInOne, 
-			   						WN_COPY_Tree(WN_array_dim(tree, ii+1)));
+			   						WN_COPY_Tree(WN_array_dim(tree, ii+1)));*/
 			}
 			WN* wn_index = WN_array_index(tree, ii);
+			if(WN_rtype(wn_index) != mtype_base_id)
+                        {
+                               wn_index = WN_Integer_Cast(WN_COPY_Tree(wn_index), mtype_base_id, WN_rtype(wn_index));
+                        }
+
 			if(wn_offset)
 				wn_offset = WN_Binary(OPR_ADD, 
 			   				WN_rtype(wn_index), 
-							WN_COPY_Tree(wn_index), 
+							wn_index, 
 							wn_offset);
 			else
 				wn_offset = WN_COPY_Tree(wn_index);
 			wn_offset = WN_Binary(OPR_MPY, 
-						MTYPE_U4, 
+						mtype_base_id, 
 						wn_offset, 
-						WN_Intconst(MTYPE_U4, TY_size(ty)));
+						WN_Intconst(mtype_base_id, TY_size(ty)));
 			//wnx = WN_Lda( Pointer_type, 0, new_sym);
 			//Set_TY_align(ST_type(new_sym), 4);
-			WN* wn_ldidbase = WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
+			//WN* wn_ldidbase = WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
 			//WN_Lda( Pointer_type, 0, new_sym);
 			//WN_Ldid(Pointer_type, 0, new_sym, ST_type(new_sym));
 			WN* newtree = WN_Binary(OPR_ADD, 
-						MTYPE_U4, 
+						mtype_base_id, 
 						wn_offset, 
 						wn_ldidbase);
 			//WN_prev(newtree) = WN_prev(tree);
